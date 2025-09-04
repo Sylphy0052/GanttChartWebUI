@@ -135,7 +135,7 @@ export const useAuth = () => {
   return {
     ...store,
     // Utility function to get authorization headers
-    getAuthHeaders: () => {
+    getAuthHeaders: (): Record<string, string> => {
       const { token } = store
       return token ? { Authorization: `Bearer ${token}` } : {}
     },

@@ -3,6 +3,7 @@
 import React from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { ProjectSelector } from '@/components/projects/ProjectSelector'
 
 export const Header: React.FC = () => {
   const pathname = usePathname()
@@ -47,6 +48,11 @@ export const Header: React.FC = () => {
               )
             })}
           </nav>
+
+          {/* Project Selector */}
+          <div className="flex items-center">
+            <ProjectSelector />
+          </div>
           
           {/* User actions */}
           <div className="flex items-center space-x-4">
