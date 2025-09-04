@@ -7,8 +7,9 @@ COPY package*.json ./
 RUN npm ci
 
 FROM base AS development
-COPY --from=deps /usr/src/app/node_modules ./node_modules
-COPY . .
+COPY apps/web/package.json ./
+RUN npm install
+COPY apps/web/. .
 EXPOSE 3000
 CMD ["npm", "run", "dev"]
 

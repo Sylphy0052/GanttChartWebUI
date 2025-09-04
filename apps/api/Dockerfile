@@ -7,9 +7,11 @@ COPY package*.json ./
 RUN npm ci
 
 FROM base AS development
-COPY --from=deps /usr/src/app/node_modules ./node_modules
-COPY . .
+COPY apps/api/package.json ./
+COPY prisma ./prisma
+RUN npm install
 RUN npx prisma generate
+COPY apps/api/. .
 EXPOSE 3001
 CMD ["npm", "run", "start:dev"]
 
