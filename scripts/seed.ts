@@ -65,7 +65,7 @@ async function main() {
     prisma.project.deleteMany({}),
   ])
 
-  const project = await prisma.project.create({ data: { name: 'PoC Project' } })
+  const project = await prisma.project.create({ data: { name: 'PoC Project', visibility: 'private' } })
   
   // Create default calendar
   await prisma.calendar.create({
