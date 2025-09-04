@@ -15,7 +15,7 @@
     "seed": "cd apps/api && npm run seed"
   },
   "devDependencies": {
-    "@types/node": "^20.0.0",
+    "@types/node": "^20.19.13",
     "turbo": "^1.10.16",
     "typescript": "^5.0.0"
   },
