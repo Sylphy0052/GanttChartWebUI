@@ -1,10 +1,13 @@
 'use client'
 
 import React, { useEffect, useRef, useState, useCallback } from 'react'
-import { useGanttStore, useGanttSelectors } from '@/stores/gantt.store'
+import { useGanttStore } from '@/stores/gantt.store'
+import { useOptimizedGanttSelectors } from '@/stores/gantt-selectors'
 import { GanttTimeline } from './GanttTimeline'
-import { GanttGrid } from './GanttGrid'
+import { VirtualizedGanttGrid } from './VirtualizedGanttGrid'
+import { VirtualizedTaskList } from './VirtualizedTaskList'
 import { GanttTask } from '@/types/gantt'
+import { usePerformanceMetrics } from '@/hooks/usePerformanceMetrics'
 
 interface GanttChartProps {
   projectId?: string
@@ -20,12 +23,35 @@ export const GanttChart: React.FC<GanttChartProps> = ({
   const containerRef = useRef<HTMLDivElement>(null)
   const [containerSize, setContainerSize] = useState({ width: 1200, height })
 
+  // Performance monitoring
+  const {
+    measureRender,
+    measureDrag,
+    measureZoom,
+    recordMetrics,
+    isAcceptable,
+    performanceReport
+  } = usePerformanceMetrics({
+    autoRecord: true,
+    enableAlerts: true,
+    onThresholdViolation: (metrics) => {
+      console.warn('🚨 Gantt Chart performance degraded:', {
+        renderTime: metrics.initialRenderTime,
+        dragTime: metrics.dragResponseTime,
+        zoomTime: metrics.zoomTransitionTime,
+        taskCount: metrics.taskCount,
+        memoryUsage: metrics.memoryUsage
+      })
+    }
+  })
+
   // Gantt store
   const {
     tasks,
     config,
     viewport,
     selectedTaskIds,
+    expandedTaskIds,
     loading,
     error,
     selectTask,
@@ -38,12 +64,17 @@ export const GanttChart: React.FC<GanttChartProps> = ({
     scrollToToday
   } = useGanttStore()
 
-  // Selectors
-  const selectors = useGanttSelectors()
-  const visibleTasks = selectors.visibleTasks()
-  const ganttStats = selectors.ganttStats()
+  // Optimized selectors
+  const selectorState = {
+    tasks,
+    config,
+    viewport,
+    selectedTaskIds,
+    expandedTaskIds
+  }
+  const { visibleTasks, ganttStats } = useOptimizedGanttSelectors(selectorState)
 
-  // Handle container resize
+  // Handle container resize with performance tracking
   useEffect(() => {
     if (!containerRef.current) return
 
@@ -53,26 +84,41 @@ export const GanttChart: React.FC<GanttChartProps> = ({
         const { width } = entry.contentRect
         setContainerSize({ width, height })
         setViewportSize(width, height)
+        
+        // Record viewport metrics
+        recordMetrics({
+          viewportWidth: width,
+          viewportHeight: height,
+          taskCount: visibleTasks.length,
+          dependencyCount: tasks.reduce((count, task) => count + task.dependencies.length, 0),
+          timeScale: config.scale
+        })
       }
     })
 
     resizeObserver.observe(containerRef.current)
     return () => resizeObserver.disconnect()
-  }, [height, setViewportSize])
+  }, [height, setViewportSize, recordMetrics, visibleTasks.length, tasks, config.scale])
 
-  // Fetch data on mount
+  // Fetch data on mount with performance measurement
   useEffect(() => {
-    fetchGanttData(projectId)
-  }, [projectId, fetchGanttData])
-
-  // Handle task selection
-  const handleTaskClick = useCallback((task: GanttTask) => {
-    if (selectedTaskIds.has(task.id)) {
-      clearSelection()
-    } else {
-      selectTask(task.id)
+    if (projectId) {
+      measureRender(() => {
+        fetchGanttData(projectId)
+      })
     }
-  }, [selectedTaskIds, selectTask, clearSelection])
+  }, [projectId, fetchGanttData, measureRender])
+
+  // Handle task selection with performance measurement
+  const handleTaskClick = useCallback((task: GanttTask) => {
+    measureDrag(() => {
+      if (selectedTaskIds.has(task.id)) {
+        clearSelection()
+      } else {
+        selectTask(task.id)
+      }
+    })
+  }, [selectedTaskIds, selectTask, clearSelection, measureDrag])
 
   // Handle keyboard shortcuts
   useEffect(() => {
@@ -84,20 +130,20 @@ export const GanttChart: React.FC<GanttChartProps> = ({
         case '=':
           if (event.ctrlKey || event.metaKey) {
             event.preventDefault()
-            zoomIn()
+            measureZoom(() => zoomIn())
           }
           break
         case '-':
         case '_':
           if (event.ctrlKey || event.metaKey) {
             event.preventDefault()
-            zoomOut()
+            measureZoom(() => zoomOut())
           }
           break
         case '0':
           if (event.ctrlKey || event.metaKey) {
             event.preventDefault()
-            zoomToFit()
+            measureZoom(() => zoomToFit())
           }
           break
         case 't':
@@ -114,7 +160,7 @@ export const GanttChart: React.FC<GanttChartProps> = ({
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [zoomIn, zoomOut, zoomToFit, scrollToToday, clearSelection])
+  }, [zoomIn, zoomOut, zoomToFit, scrollToToday, clearSelection, measureZoom])
 
   if (loading) {
     return (
@@ -173,8 +219,13 @@ export const GanttChart: React.FC<GanttChartProps> = ({
       <div className="h-12 border-b border-gray-200 bg-gray-50 flex items-center justify-between px-4">
         <div className="flex items-center space-x-4">
           <h2 className="text-sm font-semibold text-gray-900">Gantt Chart</h2>
-          <div className="text-xs text-gray-500">
-            {ganttStats.totalTasks} tasks | {ganttStats.completionRate}% complete
+          <div className="flex items-center space-x-3 text-xs text-gray-500">
+            <span>{ganttStats.totalTasks} tasks | {ganttStats.completionRate}% complete</span>
+            {!isAcceptable && (
+              <span className="text-red-500 font-medium" title={performanceReport}>
+                ⚠️ Performance Issue
+              </span>
+            )}
           </div>
         </div>
         
@@ -182,7 +233,7 @@ export const GanttChart: React.FC<GanttChartProps> = ({
           {/* Zoom controls */}
           <div className="flex items-center border border-gray-300 rounded">
             <button
-              onClick={zoomOut}
+              onClick={() => measureZoom(() => zoomOut())}
               className="px-2 py-1 text-xs hover:bg-gray-100 border-r border-gray-300"
               title="Zoom out (Ctrl + -)"
             >
@@ -192,7 +243,7 @@ export const GanttChart: React.FC<GanttChartProps> = ({
               {config.scale}
             </span>
             <button
-              onClick={zoomIn}
+              onClick={() => measureZoom(() => zoomIn())}
               className="px-2 py-1 text-xs hover:bg-gray-100"
               title="Zoom in (Ctrl + +)"
             >
@@ -202,7 +253,7 @@ export const GanttChart: React.FC<GanttChartProps> = ({
           
           {/* Action buttons */}
           <button
-            onClick={zoomToFit}
+            onClick={() => measureZoom(() => zoomToFit())}
             className="px-3 py-1 text-xs border border-gray-300 rounded hover:bg-gray-100"
             title="Fit to window (Ctrl + 0)"
           >
@@ -230,32 +281,14 @@ export const GanttChart: React.FC<GanttChartProps> = ({
             <div className="text-xs font-semibold text-gray-700">Task Name</div>
           </div>
           
-          {/* Task list */}
-          <div>
-            {visibleTasks.map((task, index) => (
-              <div
-                key={task.id}
-                className={`
-                  h-10 px-4 flex items-center cursor-pointer border-b border-gray-200 text-sm
-                  ${selectedTaskIds.has(task.id) ? 'bg-blue-50 text-blue-900' : 'hover:bg-gray-100'}
-                `}
-                onClick={() => handleTaskClick(task)}
-              >
-                <div className="flex-1 truncate">
-                  <span className={`inline-block w-3 h-3 rounded mr-2 ${
-                    task.status === 'DONE' ? 'bg-green-500' :
-                    task.status === 'IN_PROGRESS' ? 'bg-blue-500' :
-                    task.status === 'CANCELLED' ? 'bg-red-500' :
-                    'bg-gray-400'
-                  }`} />
-                  {task.title}
-                </div>
-                <div className="text-xs text-gray-500 ml-2">
-                  {task.progress}%
-                </div>
-              </div>
-            ))}
-          </div>
+          {/* Virtualized Task list */}
+          <VirtualizedTaskList
+            tasks={visibleTasks}
+            selectedTaskIds={selectedTaskIds}
+            onTaskClick={handleTaskClick}
+            height={height - 12 - 12} // Total height - toolbar height - header height
+            rowHeight={viewport.rowHeight}
+          />
         </div>
 
         {/* Gantt chart area */}
@@ -268,13 +301,14 @@ export const GanttChart: React.FC<GanttChartProps> = ({
               className="sticky top-0 z-10"
             />
 
-            {/* Gantt grid */}
-            <GanttGrid
+            {/* Virtualized Gantt grid */}
+            <VirtualizedGanttGrid
               tasks={visibleTasks}
               config={config}
               viewport={viewport}
               selectedTaskIds={selectedTaskIds}
               onTaskClick={handleTaskClick}
+              height={height - 12 - 12} // Total height - toolbar height - timeline height
             />
           </div>
         </div>
