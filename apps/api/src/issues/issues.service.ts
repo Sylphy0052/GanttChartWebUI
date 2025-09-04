@@ -4,6 +4,15 @@ import { CreateIssueDto } from './dto/create-issue.dto';
 import { UpdateIssueDto, BulkUpdateIssueDto } from './dto/update-issue.dto';
 import { QueryIssueDto } from './dto/query-issue.dto';
 import { PaginatedIssueResponseDto, BulkOperationResponseDto } from './dto/issue-response.dto';
+import { 
+  WBSTreeResponseDto, 
+  WBSNodeDto, 
+  WBSTreeQueryDto, 
+  GanttDataResponseDto, 
+  GanttTaskDto, 
+  GanttDataQueryDto,
+  WBSNodeStatus 
+} from './dto/wbs-tree.dto';
 
 @Injectable()
 export class IssuesService {
@@ -328,5 +337,321 @@ export class IssuesService {
     }
 
     return false;
+  }
+
+  // WBS Tree Methods
+  async getIssueTree(query: WBSTreeQueryDto): Promise<WBSTreeResponseDto> {
+    const {
+      projectId,
+      maxDepth = 10,
+      includeCompleted = true,
+      expandLevel = 2
+    } = query;
+
+    // Build where clause
+    const whereClause: any = {
+      deletedAt: null
+    };
+
+    if (projectId) {
+      whereClause.projectId = projectId;
+    }
+
+    if (!includeCompleted) {
+      whereClause.status = {
+        not: 'done'
+      };
+    }
+
+    // Get all issues with their relationships
+    const issues = await this.prisma.issue.findMany({
+      where: whereClause,
+      include: {
+        children: {
+          where: { deletedAt: null },
+          select: { id: true }
+        }
+      },
+      orderBy: [
+        { priority: 'desc' },
+        { title: 'asc' }
+      ]
+    });
+
+    // Build hierarchy tree
+    const tree = this.buildWBSTree(issues, expandLevel, maxDepth);
+    const stats = this.calculateTreeStats(tree);
+
+    return {
+      nodes: tree,
+      totalNodes: stats.totalNodes,
+      maxDepth: stats.maxDepth,
+      visibleNodes: stats.visibleNodes,
+      generatedAt: new Date().toISOString()
+    };
+  }
+
+  async getGanttData(query: GanttDataQueryDto): Promise<GanttDataResponseDto> {
+    const {
+      projectId,
+      startDate,
+      endDate,
+      includeDependencies = true,
+      includeCompleted = true
+    } = query;
+
+    // Build where clause
+    const whereClause: any = {
+      deletedAt: null
+    };
+
+    if (projectId) {
+      whereClause.projectId = projectId;
+    }
+
+    if (startDate || endDate) {
+      whereClause.OR = [];
+      
+      if (startDate) {
+        whereClause.OR.push({
+          startDate: {
+            gte: new Date(startDate)
+          }
+        });
+      }
+      
+      if (endDate) {
+        whereClause.OR.push({
+          dueDate: {
+            lte: new Date(endDate)
+          }
+        });
+      }
+    }
+
+    if (!includeCompleted) {
+      whereClause.status = {
+        not: 'done'
+      };
+    }
+
+    // Get issues for gantt display
+    const issues = await this.prisma.issue.findMany({
+      where: whereClause,
+      orderBy: [
+        { startDate: 'asc' },
+        { priority: 'desc' },
+        { title: 'asc' }
+      ]
+    });
+
+    // Convert to gantt tasks
+    const tasks = this.convertToGanttTasks(issues);
+    
+    // Calculate project date range
+    const dateRange = this.calculateProjectDateRange(tasks);
+
+    // Dependencies would be fetched from a separate table in a real implementation
+    const dependencies = []; // TODO: Implement dependency fetching
+
+    return {
+      tasks,
+      dependencies,
+      projectStartDate: dateRange.startDate.toISOString(),
+      projectEndDate: dateRange.endDate.toISOString(),
+      totalTasks: tasks.length,
+      generatedAt: new Date().toISOString()
+    };
+  }
+
+  private buildWBSTree(issues: any[], expandLevel: number, maxDepth: number): WBSNodeDto[] {
+    const issueMap = new Map<string, any>();
+    const roots: WBSNodeDto[] = [];
+
+    // Create issue map for fast lookup
+    issues.forEach(issue => {
+      issueMap.set(issue.id, {
+        ...issue,
+        children: [],
+        level: 0,
+        hasChildren: issue.children.length > 0
+      });
+    });
+
+    // Build tree structure
+    issues.forEach(issue => {
+      const node = issueMap.get(issue.id);
+      
+      if (issue.parentIssueId) {
+        const parent = issueMap.get(issue.parentIssueId);
+        if (parent) {
+          parent.children.push(node);
+          node.level = parent.level + 1;
+        } else {
+          // Orphaned node - add to roots
+          roots.push(this.convertToWBSNode(node, [], expandLevel));
+        }
+      } else {
+        roots.push(this.convertToWBSNode(node, [], expandLevel));
+      }
+    });
+
+    // Convert to WBS nodes and apply hierarchy
+    return this.processWBSNodes(roots, issueMap, expandLevel, maxDepth);
+  }
+
+  private processWBSNodes(
+    nodes: any[], 
+    issueMap: Map<string, any>, 
+    expandLevel: number, 
+    maxDepth: number,
+    currentLevel: number = 0
+  ): WBSNodeDto[] {
+    return nodes.map((node, index) => {
+      const wbsNode = this.convertToWBSNode(node, [node.id], expandLevel);
+      wbsNode.level = currentLevel;
+      wbsNode.order = index;
+      wbsNode.isVisible = currentLevel <= maxDepth;
+
+      if (node.children && node.children.length > 0) {
+        wbsNode.children = this.processWBSNodes(
+          node.children,
+          issueMap,
+          expandLevel,
+          maxDepth,
+          currentLevel + 1
+        );
+      }
+
+      return wbsNode;
+    });
+  }
+
+  private convertToWBSNode(issue: any, path: string[], expandLevel: number): WBSNodeDto {
+    return {
+      id: issue.id,
+      title: issue.title,
+      description: issue.description || undefined,
+      parentId: issue.parentIssueId || undefined,
+      projectId: issue.projectId,
+      assigneeId: issue.assigneeId || undefined,
+      status: this.mapIssueStatusToWBSStatus(issue.status),
+      startDate: issue.startDate?.toISOString() || undefined,
+      dueDate: issue.dueDate?.toISOString() || undefined,
+      estimatedHours: issue.estimateValue * (issue.estimateUnit === 'h' ? 1 : 8),
+      progress: issue.progress,
+      version: issue.version,
+      level: issue.level,
+      order: 0, // Will be set during processing
+      isExpanded: issue.level < expandLevel,
+      children: [],
+      hasChildren: issue.hasChildren,
+      isVisible: true,
+      path: path
+    };
+  }
+
+  private convertToGanttTasks(issues: any[]): GanttTaskDto[] {
+    return issues.map((issue, index) => ({
+      id: issue.id,
+      title: issue.title,
+      description: issue.description || undefined,
+      parentId: issue.parentIssueId || undefined,
+      startDate: (issue.startDate || new Date()).toISOString(),
+      endDate: (issue.dueDate || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)).toISOString(),
+      progress: issue.progress,
+      status: this.mapIssueStatusToWBSStatus(issue.status),
+      assigneeId: issue.assigneeId || undefined,
+      assigneeName: undefined, // TODO: Fetch from user service
+      estimatedHours: issue.estimateValue * (issue.estimateUnit === 'h' ? 1 : 8),
+      actualHours: issue.spent || 0,
+      level: 0, // Will be calculated based on hierarchy
+      order: index,
+      color: this.getTaskColorByStatus(issue.status, issue.type)
+    }));
+  }
+
+  private mapIssueStatusToWBSStatus(status: string): WBSNodeStatus {
+    const statusMap: Record<string, WBSNodeStatus> = {
+      'todo': WBSNodeStatus.TODO,
+      'doing': WBSNodeStatus.IN_PROGRESS,
+      'blocked': WBSNodeStatus.IN_PROGRESS,
+      'review': WBSNodeStatus.IN_PROGRESS,
+      'done': WBSNodeStatus.DONE
+    };
+    
+    return statusMap[status.toLowerCase()] || WBSNodeStatus.TODO;
+  }
+
+  private getTaskColorByStatus(status: string, type: string): string {
+    const statusColors: Record<string, string> = {
+      todo: '#94a3b8',      // gray
+      doing: '#3b82f6',     // blue  
+      blocked: '#ef4444',   // red
+      review: '#f59e0b',    // amber
+      done: '#10b981'       // emerald
+    };
+
+    const typeColors: Record<string, string> = {
+      feature: '#8b5cf6',   // violet
+      bug: '#ef4444',       // red
+      spike: '#06b6d4',     // cyan
+      chore: '#6b7280'      // gray
+    };
+
+    return statusColors[status.toLowerCase()] || typeColors[type?.toLowerCase()] || '#6b7280';
+  }
+
+  private calculateProjectDateRange(tasks: GanttTaskDto[]): { startDate: Date; endDate: Date } {
+    if (tasks.length === 0) {
+      const now = new Date();
+      return {
+        startDate: new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000),
+        endDate: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000)
+      };
+    }
+
+    const startDates = tasks.map(task => new Date(task.startDate).getTime());
+    const endDates = tasks.map(task => new Date(task.endDate).getTime());
+    
+    const minStart = Math.min(...startDates);
+    const maxEnd = Math.max(...endDates);
+    
+    const totalDuration = maxEnd - minStart;
+    const paddingTime = totalDuration * 0.1; // 10% padding
+    
+    return {
+      startDate: new Date(minStart - paddingTime),
+      endDate: new Date(maxEnd + paddingTime)
+    };
+  }
+
+  private calculateTreeStats(nodes: WBSNodeDto[]): {
+    totalNodes: number;
+    maxDepth: number;
+    visibleNodes: number;
+  } {
+    let totalNodes = 0;
+    let maxDepth = 0;
+    let visibleNodes = 0;
+
+    const traverse = (nodeList: WBSNodeDto[], depth: number) => {
+      nodeList.forEach(node => {
+        totalNodes++;
+        maxDepth = Math.max(maxDepth, depth);
+        
+        if (node.isVisible) {
+          visibleNodes++;
+        }
+        
+        if (node.children && node.children.length > 0) {
+          traverse(node.children, depth + 1);
+        }
+      });
+    };
+
+    traverse(nodes, 0);
+
+    return { totalNodes, maxDepth: maxDepth + 1, visibleNodes };
   }
 }

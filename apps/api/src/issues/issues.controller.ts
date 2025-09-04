@@ -24,6 +24,12 @@ import { CreateIssueDto } from './dto/create-issue.dto';
 import { UpdateIssueDto, BulkUpdateIssueDto } from './dto/update-issue.dto';
 import { QueryIssueDto } from './dto/query-issue.dto';
 import { IssueResponseDto, PaginatedIssueResponseDto, BulkOperationResponseDto } from './dto/issue-response.dto';
+import { 
+  WBSTreeResponseDto, 
+  WBSTreeQueryDto, 
+  GanttDataResponseDto, 
+  GanttDataQueryDto 
+} from './dto/wbs-tree.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt.guard';
 
 @ApiTags('Issues')
@@ -212,5 +218,80 @@ export class IssuesController {
 
     const result = await this.issuesService.findAll(queryDto);
     return result.items;
+  }
+
+  // WBS and Gantt endpoints
+  @Get('tree')
+  @ApiOperation({ summary: 'Get WBS tree structure' })
+  @ApiResponse({
+    status: 200,
+    description: 'WBS tree retrieved successfully',
+    type: WBSTreeResponseDto
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Bad request - invalid query parameters'
+  })
+  @ApiQuery({ name: 'projectId', required: false, description: 'Filter by project ID' })
+  @ApiQuery({ name: 'maxDepth', required: false, type: Number, description: 'Maximum depth to expand' })
+  @ApiQuery({ name: 'includeCompleted', required: false, type: Boolean, description: 'Include completed tasks' })
+  @ApiQuery({ name: 'expandLevel', required: false, type: Number, description: 'Default expand level' })
+  async getWBSTree(@Query() query: WBSTreeQueryDto): Promise<WBSTreeResponseDto> {
+    return this.issuesService.getIssueTree(query);
+  }
+
+  @Get('gantt')
+  @ApiOperation({ summary: 'Get Gantt chart data' })
+  @ApiResponse({
+    status: 200,
+    description: 'Gantt data retrieved successfully',
+    type: GanttDataResponseDto
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Bad request - invalid query parameters'
+  })
+  @ApiQuery({ name: 'projectId', required: false, description: 'Filter by project ID' })
+  @ApiQuery({ name: 'startDate', required: false, description: 'Start date for data range (ISO string)' })
+  @ApiQuery({ name: 'endDate', required: false, description: 'End date for data range (ISO string)' })
+  @ApiQuery({ name: 'includeDependencies', required: false, type: Boolean, description: 'Include task dependencies' })
+  @ApiQuery({ name: 'includeCompleted', required: false, type: Boolean, description: 'Include completed tasks' })
+  async getGanttData(@Query() query: GanttDataQueryDto): Promise<GanttDataResponseDto> {
+    return this.issuesService.getGanttData(query);
+  }
+
+  @Get('projects/:projectId/tree')
+  @ApiOperation({ summary: 'Get WBS tree for specific project' })
+  @ApiResponse({
+    status: 200,
+    description: 'Project WBS tree retrieved successfully',
+    type: WBSTreeResponseDto
+  })
+  @ApiQuery({ name: 'maxDepth', required: false, type: Number, description: 'Maximum depth to expand' })
+  @ApiQuery({ name: 'includeCompleted', required: false, type: Boolean, description: 'Include completed tasks' })
+  @ApiQuery({ name: 'expandLevel', required: false, type: Number, description: 'Default expand level' })
+  async getProjectWBSTree(
+    @Param('projectId') projectId: string,
+    @Query() query: Omit<WBSTreeQueryDto, 'projectId'>
+  ): Promise<WBSTreeResponseDto> {
+    return this.issuesService.getIssueTree({ ...query, projectId });
+  }
+
+  @Get('projects/:projectId/gantt')
+  @ApiOperation({ summary: 'Get Gantt chart data for specific project' })
+  @ApiResponse({
+    status: 200,
+    description: 'Project Gantt data retrieved successfully',
+    type: GanttDataResponseDto
+  })
+  @ApiQuery({ name: 'startDate', required: false, description: 'Start date for data range (ISO string)' })
+  @ApiQuery({ name: 'endDate', required: false, description: 'End date for data range (ISO string)' })
+  @ApiQuery({ name: 'includeDependencies', required: false, type: Boolean, description: 'Include task dependencies' })
+  @ApiQuery({ name: 'includeCompleted', required: false, type: Boolean, description: 'Include completed tasks' })
+  async getProjectGanttData(
+    @Param('projectId') projectId: string,
+    @Query() query: Omit<GanttDataQueryDto, 'projectId'>
+  ): Promise<GanttDataResponseDto> {
+    return this.issuesService.getGanttData({ ...query, projectId });
   }
 }
