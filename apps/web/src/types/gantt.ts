@@ -11,6 +11,7 @@ export interface GanttTask {
   endDate: Date
   progress: number
   status: 'TODO' | 'IN_PROGRESS' | 'DONE' | 'CANCELLED'
+  priority?: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
   assigneeId?: string
   assigneeName?: string
   estimatedHours?: number
@@ -19,6 +20,8 @@ export interface GanttTask {
   level: number
   order: number
   color?: string
+  type?: 'task' | 'milestone' | 'summary'
+  milestoneDate?: Date
 }
 
 export interface GanttDependency {
@@ -164,4 +167,47 @@ export interface GanttKeyboardShortcuts {
   'minus': () => void
   'home': () => void
   'end': () => void
+}
+
+export interface GanttMilestone {
+  id: string
+  title: string
+  description?: string
+  date: Date
+  type: 'project_start' | 'project_end' | 'phase_completion' | 'delivery' | 'review' | 'custom'
+  priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
+  status: 'PENDING' | 'ACHIEVED' | 'MISSED' | 'AT_RISK'
+  achievedDate?: Date
+  relatedTaskIds: string[]
+  color?: string
+  icon?: string
+}
+
+export interface GanttCriticalPath {
+  tasks: GanttTask[]
+  totalDuration: number
+  startDate: Date
+  endDate: Date
+  slackTime: number
+}
+
+export interface GanttProgressSummary {
+  totalTasks: number
+  completedTasks: number
+  inProgressTasks: number
+  overdueTasks: number
+  completionPercentage: number
+  estimatedCompletionDate: Date
+  currentProgress: {
+    onTime: number
+    delayed: number
+    ahead: number
+  }
+}
+
+export interface GanttMilestoneViewOptions {
+  showMilestones: boolean
+  milestoneTypes: GanttMilestone['type'][]
+  showMilestoneConnections: boolean
+  showMilestoneProgress: boolean
 }
