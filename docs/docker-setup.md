@@ -25,14 +25,14 @@
 
 ```bash
 # プロジェクト全体をビルド・起動
-docker-compose up -d
+docker compose up -d
 
 # ログの確認
-docker-compose logs -f
+docker compose logs -f
 
 # 特定のサービスのログ確認
-docker-compose logs -f api
-docker-compose logs -f web
+docker compose logs -f api
+docker compose logs -f web
 ```
 
 ### 開発環境（Development）
@@ -41,10 +41,10 @@ docker-compose logs -f web
 
 ```bash
 # 開発環境用の設定で起動
-docker-compose -f docker-compose.dev.yml up -d
+docker compose -f docker-compose.dev.yml up -d
 
 # ログの確認
-docker-compose -f docker-compose.dev.yml logs -f
+docker compose -f docker-compose.dev.yml logs -f
 ```
 
 ## データベースの初期化
@@ -53,17 +53,17 @@ docker-compose -f docker-compose.dev.yml logs -f
 
 ```bash
 # APIコンテナ内でマイグレーション実行
-docker-compose exec api npm run prisma:migrate
+docker compose exec api npm run prisma:migrate
 
 # または、新しいコンテナでマイグレーション実行
-docker-compose run --rm api npm run prisma:migrate
+docker compose run --rm api npm run prisma:migrate
 ```
 
 ### シードデータ投入
 
 ```bash
 # シードデータの投入
-docker-compose exec api npm run seed
+docker compose exec api npm run seed
 ```
 
 ## 主要なDocker操作
@@ -72,48 +72,48 @@ docker-compose exec api npm run seed
 
 ```bash
 # 全サービス起動
-docker-compose up -d
+docker compose up -d
 
 # 特定のサービスのみ起動
-docker-compose up -d postgres api
+docker compose up -d postgres api
 
 # サービス停止
-docker-compose down
+docker compose down
 
 # サービス停止（ボリュームも削除）
-docker-compose down -v
+docker compose down -v
 
 # サービス再起動
-docker-compose restart
+docker compose restart
 
 # 特定のサービスの再起動
-docker-compose restart api
+docker compose restart api
 ```
 
 ### コンテナ内でのコマンド実行
 
 ```bash
 # APIコンテナ内でシェル実行
-docker-compose exec api sh
+docker compose exec api sh
 
 # Webコンテナ内でシェル実行
-docker-compose exec web sh
+docker compose exec web sh
 
 # データベース接続
-docker-compose exec postgres psql -U gantt_user -d gantt_chart
+docker compose exec postgres psql -U gantt_user -d gantt_chart
 ```
 
 ### ログ確認
 
 ```bash
 # 全サービスのログ
-docker-compose logs -f
+docker compose logs -f
 
 # 特定のサービスのログ
-docker-compose logs -f api
+docker compose logs -f api
 
 # 最新100行のログを表示
-docker-compose logs --tail=100 web
+docker compose logs --tail=100 web
 ```
 
 ## 環境変数の設定
@@ -150,7 +150,7 @@ services:
 
 ```bash
 # サービス状態の確認
-docker-compose ps
+docker compose ps
 
 # ヘルスチェック詳細
 docker inspect gantt-api | grep Health -A 10
@@ -168,24 +168,24 @@ netstat -tulpn | grep :3000
 netstat -tulpn | grep :3001
 
 # 使用中のプロセスを終了後、再度起動
-docker-compose down && docker-compose up -d
+docker compose down && docker-compose up -d
 ```
 
 #### 2. データベース接続エラー
 
 ```bash
 # PostgreSQLコンテナの状態確認
-docker-compose logs postgres
+docker compose logs postgres
 
 # データベース接続テスト
-docker-compose exec postgres pg_isready -U gantt_user
+docker compose exec postgres pg_isready -U gantt_user
 ```
 
 #### 3. ビルドエラー
 
 ```bash
 # イメージの再ビルド
-docker-compose build --no-cache
+docker compose build --no-cache
 
 # 未使用のDockerリソースクリーンアップ
 docker system prune -a
@@ -195,8 +195,8 @@ docker system prune -a
 
 ```bash
 # コンテナ内で依存関係を再インストール
-docker-compose exec api npm install
-docker-compose exec web npm install
+docker compose exec api npm install
+docker compose exec web npm install
 ```
 
 ### ログレベル設定
@@ -246,10 +246,10 @@ services:
 
 ```bash
 # バックアップ作成
-docker-compose exec postgres pg_dump -U gantt_user gantt_chart > backup.sql
+docker compose exec postgres pg_dump -U gantt_user gantt_chart > backup.sql
 
 # バックアップからリストア
-docker-compose exec -T postgres psql -U gantt_user gantt_chart < backup.sql
+docker compose exec -T postgres psql -U gantt_user gantt_chart < backup.sql
 ```
 
 ## アクセス情報
