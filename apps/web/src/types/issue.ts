@@ -134,3 +134,93 @@ export interface BulkOperationResponse {
     error: string;
   }>;
 }
+
+// Hierarchy and WBS extensions
+export interface IssueHierarchy extends Issue {
+  children?: IssueHierarchy[];
+  level: number;
+  path: string[];
+  hasChildren: boolean;
+  isExpanded?: boolean;
+  order: number;
+}
+
+export interface IssueTreeNode {
+  issue: Issue;
+  children: IssueTreeNode[];
+  parent?: IssueTreeNode;
+  level: number;
+  isVisible: boolean;
+  isExpanded: boolean;
+}
+
+// Gantt integration types
+export interface IssueGantt extends Issue {
+  dependencies: IssueDependency[];
+  actualStartDate?: string;
+  actualEndDate?: string;
+  baseline?: {
+    startDate: string;
+    endDate: string;
+    progress: number;
+  };
+}
+
+export interface IssueDependency {
+  id: string;
+  predecessorId: string;
+  successorId: string;
+  type: 'FS' | 'SS' | 'FF' | 'SF';
+  lag: number;
+  lagUnit: 'days' | 'hours';
+}
+
+// Tree operations
+export interface IssueTreeOperation {
+  type: 'move' | 'reorder' | 'expand' | 'collapse';
+  issueId: string;
+  targetParentId?: string;
+  targetPosition?: number;
+  newLevel?: number;
+}
+
+// Bulk tree operations
+export interface IssueTreeBulkOperation {
+  operations: IssueTreeOperation[];
+  validateHierarchy: boolean;
+  preventCircular: boolean;
+}
+
+// Tree validation
+export interface IssueTreeValidation {
+  isValid: boolean;
+  errors: Array<{
+    type: 'circular' | 'depth' | 'orphan' | 'duplicate';
+    issueId: string;
+    message: string;
+  }>;
+  warnings: Array<{
+    type: 'performance' | 'depth';
+    issueId: string;
+    message: string;
+  }>;
+}
+
+// Extended filters for tree views
+export interface IssueTreeFilters extends IssueFilters {
+  rootsOnly?: boolean;
+  maxDepth?: number;
+  expandLevel?: number;
+  includeSubtasks?: boolean;
+  sortBy?: 'order' | 'priority' | 'startDate' | 'dueDate' | 'title';
+  sortOrder?: 'asc' | 'desc';
+}
+
+// Performance monitoring
+export interface IssueTreeMetrics {
+  nodeCount: number;
+  maxDepth: number;
+  visibleNodes: number;
+  renderTime: number;
+  memoryUsage?: number;
+}

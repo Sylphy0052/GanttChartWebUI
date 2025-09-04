@@ -247,7 +247,7 @@ export const useIssuesStore = create<IssuesStore>((set, get) => ({
 }))
 
 // Helper function to get auth headers (this will be moved to a shared utility later)
-function getAuthHeaders() {
+function getAuthHeaders(): Record<string, string> {
   // For now, we'll try to get the token from localStorage directly
   // In a real app, this should be coordinated with the auth store
   if (typeof window !== 'undefined') {
@@ -296,7 +296,7 @@ export const useIssues = () => {
     
     // Filter by status
     filterByStatus: async (status: string) => {
-      const newFilters = { ...store.filters, status }
+      const newFilters = { ...store.filters, status: status as any }
       store.resetPagination()
       await store.fetchIssues(newFilters, false)
     },

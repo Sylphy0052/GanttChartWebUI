@@ -78,10 +78,10 @@ export default function CreateIssuePage() {
   }
 
   const handleAddLabel = () => {
-    if (labelInput.trim() && !formData.labels.includes(labelInput.trim())) {
+    if (labelInput.trim() && formData.labels && !formData.labels.includes(labelInput.trim())) {
       setFormData(prev => ({
         ...prev,
-        labels: [...prev.labels, labelInput.trim()]
+        labels: [...(prev.labels || []), labelInput.trim()]
       }))
       setLabelInput('')
     }
@@ -90,7 +90,7 @@ export default function CreateIssuePage() {
   const handleRemoveLabel = (labelToRemove: string) => {
     setFormData(prev => ({
       ...prev,
-      labels: prev.labels.filter(label => label !== labelToRemove)
+      labels: (prev.labels || []).filter(label => label !== labelToRemove)
     }))
   }
 
@@ -301,9 +301,9 @@ export default function CreateIssuePage() {
                 追加
               </Button>
             </div>
-            {formData.labels.length > 0 && (
+            {formData.labels && formData.labels.length > 0 && (
               <div className="mt-2 flex flex-wrap gap-2">
-                {formData.labels.map((label, index) => (
+                {formData.labels?.map((label, index) => (
                   <span
                     key={index}
                     className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800"
