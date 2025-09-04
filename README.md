@@ -28,16 +28,19 @@ Backlog風のタスク管理をしつつ、WBSやガントチャートの閲覧�
 ## セットアップ手順
 
 ### 前提条件
+
 - Node.js 20.x
 - Docker & Docker Compose
 - npm or pnpm
 
 ### 1. 依存関係のインストール
+
 ```bash
 npm install
 ```
 
 ### 2. 環境変数の設定
+
 ```bash
 # APIの環境変数
 cp apps/api/.env.example apps/api/.env
@@ -47,31 +50,36 @@ cp apps/web/.env.example apps/web/.env.local
 ```
 
 ### 3. Dockerで開発環境を起動
+
 ```bash
 cd infra/docker
 docker compose up -d
 ```
 
 ### 4. データベースのマイグレーション
+
 ```bash
 cd apps/api
 npx prisma migrate dev
 ```
 
 ### 5. シードデータの投入（1,000件のダミーデータ）
+
 ```bash
 npm run seed
 ```
 
 ### 6. アプリケーションの起動
+
 ```bash
 # プロジェクトルートで
 npm run dev
 ```
 
 アクセス先:
-- Web: http://localhost:3000
-- API: http://localhost:3001/api/v1
+
+- Web: <http://localhost:3000>
+- API: <http://localhost:3001/api/v1>
 
 ## 主要機能（PoC版）
 
@@ -107,7 +115,3 @@ npm run lint
 - 1,000 Issueでのガント初回描画: < 1.5秒
 - ドラッグ操作の応答: < 100ms
 - ズーム切替: < 150ms
-
-## ライセンス
-
-Private
