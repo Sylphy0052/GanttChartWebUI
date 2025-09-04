@@ -55,7 +55,7 @@ start_dev() {
     cd "$PROJECT_ROOT"
     
     # Docker Composeで起動
-    docker-compose -f "$COMPOSE_FILE" up -d
+    docker compose -f "$COMPOSE_FILE" up -d
     
     log_success "開発環境が起動しました"
     log_info "フロントエンド: http://localhost:3000"
@@ -68,7 +68,7 @@ stop_dev() {
     log_info "開発環境を停止しています..."
     cd "$PROJECT_ROOT"
     
-    docker-compose -f "$COMPOSE_FILE" down
+    docker compose -f "$COMPOSE_FILE" down
     
     log_success "開発環境が停止しました"
 }
@@ -85,7 +85,7 @@ show_logs() {
     log_info "ログを表示しています... (Ctrl+Cで終了)"
     cd "$PROJECT_ROOT"
     
-    docker-compose -f "$COMPOSE_FILE" logs -f
+    docker compose -f "$COMPOSE_FILE" logs -f
 }
 
 # APIコンテナのシェル
@@ -93,7 +93,7 @@ api_shell() {
     log_info "APIコンテナのシェルを開きます..."
     cd "$PROJECT_ROOT"
     
-    docker-compose -f "$COMPOSE_FILE" exec api sh
+    docker compose -f "$COMPOSE_FILE" exec api sh
 }
 
 # データベース接続
@@ -101,7 +101,7 @@ connect_db() {
     log_info "PostgreSQLに接続しています..."
     cd "$PROJECT_ROOT"
     
-    docker-compose -f "$COMPOSE_FILE" exec postgres psql -U gantt_user -d gantt_chart_dev
+    docker compose -f "$COMPOSE_FILE" exec postgres psql -U gantt_user -d gantt_chart_dev
 }
 
 # マイグレーション実行
@@ -109,7 +109,7 @@ run_migrate() {
     log_info "データベースマイグレーションを実行しています..."
     cd "$PROJECT_ROOT"
     
-    docker-compose -f "$COMPOSE_FILE" exec api npm run prisma:migrate
+    docker compose -f "$COMPOSE_FILE" exec api npm run prisma:migrate
     
     log_success "マイグレーションが完了しました"
 }
@@ -119,7 +119,7 @@ run_seed() {
     log_info "シードデータを投入しています..."
     cd "$PROJECT_ROOT"
     
-    docker-compose -f "$COMPOSE_FILE" exec api npm run seed
+    docker compose -f "$COMPOSE_FILE" exec api npm run seed
     
     log_success "シードデータの投入が完了しました"
 }
@@ -134,7 +134,7 @@ clean_all() {
         log_info "クリーンアップを実行しています..."
         cd "$PROJECT_ROOT"
         
-        docker-compose -f "$COMPOSE_FILE" down -v --remove-orphans
+        docker compose -f "$COMPOSE_FILE" down -v --remove-orphans
         docker system prune -f
         
         log_success "クリーンアップが完了しました"
@@ -148,7 +148,7 @@ show_status() {
     log_info "サービス状況:"
     cd "$PROJECT_ROOT"
     
-    docker-compose -f "$COMPOSE_FILE" ps
+    docker compose -f "$COMPOSE_FILE" ps
     
     echo ""
     log_info "ヘルスチェック:"

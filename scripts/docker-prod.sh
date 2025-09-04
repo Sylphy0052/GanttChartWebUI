@@ -87,8 +87,8 @@ deploy_prod() {
     fi
     
     # ビルドと起動
-    docker-compose -f "$COMPOSE_FILE" build --no-cache
-    docker-compose -f "$COMPOSE_FILE" up -d
+    docker compose -f "$COMPOSE_FILE" build --no-cache
+    docker compose -f "$COMPOSE_FILE" up -d
     
     # ヘルスチェック待機
     log_info "サービスの起動を待機しています..."
@@ -108,7 +108,7 @@ start_prod() {
     log_info "本番環境を起動しています..."
     cd "$PROJECT_ROOT"
     
-    docker-compose -f "$COMPOSE_FILE" up -d
+    docker compose -f "$COMPOSE_FILE" up -d
     
     log_success "本番環境が起動しました"
     show_access_info
@@ -119,7 +119,7 @@ stop_prod() {
     log_info "本番環境を停止しています..."
     cd "$PROJECT_ROOT"
     
-    docker-compose -f "$COMPOSE_FILE" down
+    docker compose -f "$COMPOSE_FILE" down
     
     log_success "本番環境が停止しました"
 }
@@ -140,10 +140,10 @@ show_logs() {
     
     if [[ -n "$service" ]]; then
         log_info "$service サービスのログを表示しています... (Ctrl+Cで終了)"
-        docker-compose -f "$COMPOSE_FILE" logs -f "$service"
+        docker compose -f "$COMPOSE_FILE" logs -f "$service"
     else
         log_info "全サービスのログを表示しています... (Ctrl+Cで終了)"
-        docker-compose -f "$COMPOSE_FILE" logs -f
+        docker compose -f "$COMPOSE_FILE" logs -f
     fi
 }
 
@@ -152,7 +152,7 @@ api_shell() {
     log_info "APIコンテナのシェルを開きます..."
     cd "$PROJECT_ROOT"
     
-    docker-compose -f "$COMPOSE_FILE" exec api sh
+    docker compose -f "$COMPOSE_FILE" exec api sh
 }
 
 # データベース接続
@@ -160,7 +160,7 @@ connect_db() {
     log_info "PostgreSQLに接続しています..."
     cd "$PROJECT_ROOT"
     
-    docker-compose -f "$COMPOSE_FILE" exec postgres psql -U gantt_user -d gantt_chart
+    docker compose -f "$COMPOSE_FILE" exec postgres psql -U gantt_user -d gantt_chart
 }
 
 # マイグレーション実行
@@ -168,7 +168,7 @@ run_migrate() {
     log_info "データベースマイグレーションを実行しています..."
     cd "$PROJECT_ROOT"
     
-    docker-compose -f "$COMPOSE_FILE" exec api npm run prisma:migrate
+    docker compose -f "$COMPOSE_FILE" exec api npm run prisma:migrate
     
     log_success "マイグレーションが完了しました"
 }
@@ -183,7 +183,7 @@ run_seed() {
         log_info "シードデータを投入しています..."
         cd "$PROJECT_ROOT"
         
-        docker-compose -f "$COMPOSE_FILE" exec api npm run seed
+        docker compose -f "$COMPOSE_FILE" exec api npm run seed
         
         log_success "シードデータの投入が完了しました"
     else
@@ -198,7 +198,7 @@ backup_db() {
     log_info "データベースをバックアップしています..."
     cd "$PROJECT_ROOT"
     
-    docker-compose -f "$COMPOSE_FILE" exec postgres pg_dump -U gantt_user gantt_chart > "$backup_file"
+    docker compose -f "$COMPOSE_FILE" exec postgres pg_dump -U gantt_user gantt_chart > "$backup_file"
     
     log_success "バックアップが完了しました: $backup_file"
 }
@@ -226,7 +226,7 @@ restore_db() {
         log_info "データベースをリストアしています..."
         cd "$PROJECT_ROOT"
         
-        docker-compose -f "$COMPOSE_FILE" exec -T postgres psql -U gantt_user gantt_chart < "$backup_file"
+        docker compose -f "$COMPOSE_FILE" exec -T postgres psql -U gantt_user gantt_chart < "$backup_file"
         
         log_success "データベースのリストアが完了しました"
     else
@@ -249,7 +249,7 @@ show_status() {
     log_info "サービス状況:"
     cd "$PROJECT_ROOT"
     
-    docker-compose -f "$COMPOSE_FILE" ps
+    docker compose -f "$COMPOSE_FILE" ps
 }
 
 # ヘルスチェック
@@ -259,7 +259,7 @@ check_health() {
     log_info "ヘルスチェックを実行しています..."
     
     # PostgreSQL
-    if docker-compose -f "$COMPOSE_FILE" exec postgres pg_isready -U gantt_user >/dev/null 2>&1; then
+    if docker compose -f "$COMPOSE_FILE" exec postgres pg_isready -U gantt_user >/dev/null 2>&1; then
         log_success "PostgreSQL: 正常"
     else
         log_error "PostgreSQL: 異常"
