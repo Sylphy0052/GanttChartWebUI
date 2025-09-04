@@ -101,7 +101,7 @@ export const VirtualizedTaskList = memo<VirtualizedTaskListProps>(({
         itemData={listData}
         overscanCount={5} // Render 5 extra items for smoother scrolling
       >
-        {TaskListRow}
+        {TaskListRow as any}
       </FixedSizeList>
     </div>
   )
