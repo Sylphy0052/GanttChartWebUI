@@ -12,6 +12,7 @@ interface VirtualizedTaskListProps {
   height: number
   rowHeight: number
   className?: string
+  'data-testid'?: string
 }
 
 interface TaskListRowData {
@@ -79,7 +80,7 @@ TaskListRow.displayName = 'TaskListRow'
  * Only renders visible task rows to handle large datasets efficiently.
  */
 export const VirtualizedTaskList = memo<VirtualizedTaskListProps>(
-  ({ tasks, selectedTaskIds, onTaskClick, height, rowHeight, className = '' }) => {
+  ({ tasks, selectedTaskIds, onTaskClick, height, rowHeight, className = '', 'data-testid': dataTestId }) => {
     const listData: TaskListRowData = {
       tasks,
       selectedTaskIds,
@@ -87,7 +88,7 @@ export const VirtualizedTaskList = memo<VirtualizedTaskListProps>(
     }
 
     return (
-      <div className={className}>
+      <div className={className} data-testid={dataTestId}>
         {/* react-window v2.0.2 has TypeScript compatibility issues - using createElement to bypass JSX type checking */}
         {React.createElement(
           List as any,

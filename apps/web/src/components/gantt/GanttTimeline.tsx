@@ -8,6 +8,7 @@ interface GanttTimelineProps {
   config: GanttTimelineConfig
   viewport: GanttViewport
   className?: string
+  'data-testid'?: string
 }
 
 interface TimelineSegment {
@@ -19,7 +20,7 @@ interface TimelineSegment {
   isToday?: boolean
 }
 
-export const GanttTimeline = memo<GanttTimelineProps>(({ config, viewport, className = '' }) => {
+export const GanttTimeline = memo<GanttTimelineProps>(({ config, viewport, className = '', 'data-testid': dataTestId }) => {
   const timelineSegments = useMemo((): TimelineSegment[] => {
     const segments: TimelineSegment[] = []
     const { timeScale } = viewport
@@ -125,7 +126,7 @@ export const GanttTimeline = memo<GanttTimelineProps>(({ config, viewport, class
   }, [config, viewport])
   
   return (
-    <div className={`gantt-timeline border-b border-gray-200 ${className}`}>
+    <div className={`gantt-timeline border-b border-gray-200 ${className}`} data-testid={dataTestId}>
       {/* Month headers */}
       {monthHeaders.length > 0 && (
         <div className="relative h-8 bg-gray-50 border-b border-gray-200">

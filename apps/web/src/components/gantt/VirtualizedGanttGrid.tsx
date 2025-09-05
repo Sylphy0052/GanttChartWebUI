@@ -14,6 +14,7 @@ interface VirtualizedGanttGridProps {
   onTaskClick: (task: GanttTask) => void
   height: number
   className?: string
+  'data-testid'?: string
 }
 
 interface TaskRowData {
@@ -88,7 +89,7 @@ TaskRow.displayName = 'TaskRow'
  * Only renders visible rows to handle large datasets (1000+ tasks) efficiently.
  */
 export const VirtualizedGanttGrid = memo<VirtualizedGanttGridProps>(
-  ({ tasks, config, viewport, selectedTaskIds, onTaskClick, height, className = '' }) => {
+  ({ tasks, config, viewport, selectedTaskIds, onTaskClick, height, className = '', 'data-testid': dataTestId }) => {
     /**
      * Generate optimized grid lines for visible area
      */
@@ -256,7 +257,7 @@ export const VirtualizedGanttGrid = memo<VirtualizedGanttGridProps>(
     }, [viewport])
 
     return (
-      <div className={`virtualized-gantt-grid relative bg-white ${className}`} style={{ height }}>
+      <div className={`virtualized-gantt-grid relative bg-white ${className}`} style={{ height }} data-testid={dataTestId}>
         {/* Background grid lines */}
         <svg
           className="absolute inset-0 pointer-events-none z-0"
