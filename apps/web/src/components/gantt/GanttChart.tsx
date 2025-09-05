@@ -263,6 +263,7 @@ export const GanttChart: React.FC<GanttChartProps> = ({
           {/* Scheduling controls */}
           <div className="flex items-center border border-gray-300 rounded bg-white">
             <button
+              data-testid="gantt-schedule-button"
               onClick={() => setShowScheduleCalculator(!showScheduleCalculator)}
               className={`px-2 py-1 text-xs border-r border-gray-300 transition-colors ${
                 showScheduleCalculator || isScheduleCalculating 
@@ -274,6 +275,7 @@ export const GanttChart: React.FC<GanttChartProps> = ({
               {isScheduleCalculating ? '⏳' : '📊'}
             </button>
             <button
+              data-testid="gantt-conflict-button"
               onClick={() => setShowConflictPanel(!showConflictPanel)}
               className={`px-2 py-1 text-xs border-r border-gray-300 transition-colors relative ${
                 showConflictPanel 
@@ -290,6 +292,7 @@ export const GanttChart: React.FC<GanttChartProps> = ({
               )}
             </button>
             <button
+              data-testid="gantt-audit-button"
               onClick={() => setShowAuditLog(!showAuditLog)}
               className={`px-2 py-1 text-xs border-r border-gray-300 transition-colors ${
                 showAuditLog 
@@ -301,6 +304,7 @@ export const GanttChart: React.FC<GanttChartProps> = ({
               📋
             </button>
             <button
+              data-testid="gantt-visualization-button"
               onClick={() => setShowVisualization(!showVisualization)}
               className={`px-2 py-1 text-xs transition-colors ${
                 showVisualization && lastCalculationResult
@@ -316,6 +320,7 @@ export const GanttChart: React.FC<GanttChartProps> = ({
           {/* Zoom controls */}
           <div className="flex items-center border border-gray-300 rounded">
             <button
+              data-testid="gantt-zoom-out-button"
               onClick={() => measureZoom(() => zoomOut())}
               className="px-2 py-1 text-xs hover:bg-gray-100 border-r border-gray-300"
               title="Zoom out (Ctrl + -)"
@@ -326,6 +331,7 @@ export const GanttChart: React.FC<GanttChartProps> = ({
               {config.scale}
             </span>
             <button
+              data-testid="gantt-zoom-in-button"
               onClick={() => measureZoom(() => zoomIn())}
               className="px-2 py-1 text-xs hover:bg-gray-100"
               title="Zoom in (Ctrl + +)"
@@ -336,6 +342,7 @@ export const GanttChart: React.FC<GanttChartProps> = ({
           
           {/* Action buttons */}
           <button
+            data-testid="gantt-zoom-fit-button"
             onClick={() => measureZoom(() => zoomToFit())}
             className="px-3 py-1 text-xs border border-gray-300 rounded hover:bg-gray-100"
             title="Fit to window (Ctrl + 0)"
@@ -344,6 +351,7 @@ export const GanttChart: React.FC<GanttChartProps> = ({
           </button>
           
           <button
+            data-testid="gantt-today-button"
             onClick={scrollToToday}
             className="px-3 py-1 text-xs border border-gray-300 rounded hover:bg-gray-100"
             title="Go to today (Ctrl + T)"
@@ -371,6 +379,7 @@ export const GanttChart: React.FC<GanttChartProps> = ({
             onTaskClick={handleTaskClick}
             height={height - 12 - 12} // Total height - toolbar height - header height
             rowHeight={viewport.rowHeight}
+            data-testid="gantt-task-list"
           />
         </div>
 
@@ -382,6 +391,7 @@ export const GanttChart: React.FC<GanttChartProps> = ({
               config={config}
               viewport={viewport}
               className="sticky top-0 z-10"
+              data-testid="gantt-timeline-header"
             />
 
             {/* Gantt grid container with visualization overlay */}
@@ -394,6 +404,7 @@ export const GanttChart: React.FC<GanttChartProps> = ({
                 selectedTaskIds={selectedTaskIds}
                 onTaskClick={handleTaskClick}
                 height={height - 12 - 12} // Total height - toolbar height - timeline height
+                data-testid="gantt-chart-grid"
               />
               
               {/* Scheduling Visualization Layer */}
