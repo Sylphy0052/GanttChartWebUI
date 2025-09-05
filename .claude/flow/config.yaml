@@ -1,0 +1,10 @@
+spec_path: docs/仕様書.md
+plan_path: docs/実装計画.md
+review_glob: "apps/**/*.{ts,tsx,py,go}"
+api_paths:
+- apps/api/src/**
+web_paths:
+- apps/web/src/**
+kpis:
+initial_render_ms_p95: 1500
+drag_latency_ms_p95: 100
