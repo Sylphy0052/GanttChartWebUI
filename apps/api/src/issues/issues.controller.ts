@@ -9,6 +9,7 @@ import {
   Query,
   Request,
   UseGuards,
+  UseInterceptors,
   HttpStatus,
   HttpCode
 } from '@nestjs/common';
@@ -17,7 +18,8 @@ import {
   ApiOperation,
   ApiResponse,
   ApiBearerAuth,
-  ApiQuery
+  ApiQuery,
+  ApiHeader
 } from '@nestjs/swagger';
 import { IssuesService } from './issues.service';
 import { CreateIssueDto } from './dto/create-issue.dto';
@@ -31,13 +33,19 @@ import {
   GanttDataQueryDto 
 } from './dto/wbs-tree.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt.guard';
+import { ETagInterceptor, ValidateETag } from '../scheduling/interceptors/etag.interceptor';
+import { ConflictDetectionService } from '../scheduling/services/conflict-detection.service';
 
 @ApiTags('Issues')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
+@UseInterceptors(ETagInterceptor)
 @Controller('issues')
 export class IssuesController {
-  constructor(private readonly issuesService: IssuesService) {}
+  constructor(
+    private readonly issuesService: IssuesService,
+    private readonly conflictDetectionService: ConflictDetectionService
+  ) {}
 
   @Post()
   @ApiOperation({ summary: 'Create a new issue' })
@@ -103,7 +111,13 @@ export class IssuesController {
   }
 
   @Patch(':id')
+  @ValidateETag()
   @ApiOperation({ summary: 'Update issue by ID' })
+  @ApiHeader({
+    name: 'If-Match',
+    description: 'ETag value for optimistic locking',
+    required: false
+  })
   @ApiResponse({
     status: 200,
     description: 'Issue updated successfully',
@@ -120,6 +134,10 @@ export class IssuesController {
   @ApiResponse({
     status: 409,
     description: 'Conflict - issue was modified by another user'
+  })
+  @ApiResponse({
+    status: 412,
+    description: 'Precondition failed - If-Match header mismatch'
   })
   async update(
     @Param('id') id: string,
@@ -293,5 +311,115 @@ export class IssuesController {
     @Query() query: Omit<GanttDataQueryDto, 'projectId'>
   ): Promise<GanttDataResponseDto> {
     return this.issuesService.getGanttData({ ...query, projectId });
+  }
+
+  // Conflict detection endpoints
+  @Post(':id/check-conflicts')
+  @ApiOperation({ summary: 'Check for conflicts before updating issue' })
+  @ApiResponse({
+    status: 200,
+    description: 'Conflict check completed',
+    schema: {
+      type: 'object',
+      properties: {
+        hasConflicts: { type: 'boolean' },
+        conflicts: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string' },
+              pattern: { type: 'string' },
+              severity: { type: 'string' },
+              description: { type: 'string' },
+              conflictFields: { type: 'array', items: { type: 'string' } },
+              suggestedResolution: { type: 'array', items: { type: 'string' } }
+            }
+          }
+        }
+      }
+    }
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Issue not found'
+  })
+  async checkConflicts(
+    @Param('id') id: string,
+    @Body() updateData: UpdateIssueDto,
+    @Request() req: any
+  ) {
+    const context = {
+      userId: req.user.id,
+      timestamp: new Date(),
+      operation: 'update' as const,
+      entityType: 'issue' as const,
+      entityId: id,
+      projectId: updateData.projectId || ''
+    };
+
+    const conflict = await this.conflictDetectionService.detectOptimisticConflict(
+      'issue',
+      id,
+      updateData.version || 0,
+      updateData,
+      context
+    );
+
+    return {
+      hasConflicts: conflict !== null,
+      conflicts: conflict ? [conflict] : []
+    };
+  }
+
+  @Get('projects/:projectId/check-integrity')
+  @ApiOperation({ summary: 'Check data integrity for project issues' })
+  @ApiResponse({
+    status: 200,
+    description: 'Integrity check completed',
+    schema: {
+      type: 'object',
+      properties: {
+        isValid: { type: 'boolean' },
+        issues: { type: 'number' },
+        conflicts: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string' },
+              pattern: { type: 'string' },
+              severity: { type: 'string' },
+              description: { type: 'string' },
+              entityId: { type: 'string' }
+            }
+          }
+        }
+      }
+    }
+  })
+  async checkProjectIntegrity(
+    @Param('projectId') projectId: string,
+    @Request() req: any
+  ) {
+    const context = {
+      userId: req.user.id,
+      timestamp: new Date(),
+      operation: 'update' as const,
+      entityType: 'project' as const,
+      entityId: projectId,
+      projectId: projectId
+    };
+
+    const conflicts = await this.conflictDetectionService.checkDataIntegrity(
+      projectId,
+      context
+    );
+
+    return {
+      isValid: conflicts.length === 0,
+      issues: conflicts.filter(c => c.severity === 'error').length,
+      conflicts: conflicts
+    };
   }
 }

@@ -18,7 +18,7 @@ export class Issue {
     example: '01234567-89ab-cdef-0123-456789abcdef',
     nullable: true
   })
-  parentIssueId?: string;
+  parentIssueId: string | null;
 
   @ApiProperty({
     description: 'Issue title',
@@ -75,21 +75,21 @@ export class Issue {
     example: '01234567-89ab-cdef-0123-456789abcdef',
     nullable: true
   })
-  assigneeId?: string;
+  assigneeId: string | null;
 
   @ApiProperty({
     description: 'Start date',
     example: '2025-09-05T00:00:00.000Z',
     nullable: true
   })
-  startDate?: Date;
+  startDate: Date | null;
 
   @ApiProperty({
     description: 'Due date',
     example: '2025-09-12T00:00:00.000Z',
     nullable: true
   })
-  dueDate?: Date;
+  dueDate: Date | null;
 
   @ApiProperty({
     description: 'Progress percentage (0-100)',
@@ -117,7 +117,7 @@ export class Issue {
     example: null,
     nullable: true
   })
-  deletedAt?: Date;
+  deletedAt: Date | null;
 
   @ApiProperty({
     description: 'Creation timestamp',

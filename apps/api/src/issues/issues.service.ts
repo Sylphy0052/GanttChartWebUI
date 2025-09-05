@@ -138,16 +138,19 @@ export class IssuesService {
       }
     }
 
+    const safeLimitValue = limit ?? 10;
+    const safeSortBy = sortBy ?? 'createdAt';
+    
     const [items, total] = await Promise.all([
       this.prisma.issue.findMany({
         where: { ...where, ...cursorCondition },
-        take: limit + 1, // Take one extra to check if there are more items
-        orderBy: { [sortBy]: sortOrder },
+        take: safeLimitValue + 1, // Take one extra to check if there are more items
+        orderBy: { [safeSortBy]: sortOrder },
       }),
       this.prisma.issue.count({ where })
     ]);
 
-    const hasMore = items.length > limit;
+    const hasMore = items.length > safeLimitValue;
     if (hasMore) {
       items.pop(); // Remove the extra item
     }
@@ -228,8 +231,8 @@ export class IssuesService {
     // Remove undefined fields and version from update data
     const { version: _, ...cleanUpdateData } = updateData;
     Object.keys(cleanUpdateData).forEach(key => {
-      if (cleanUpdateData[key] === undefined) {
-        delete cleanUpdateData[key];
+      if (cleanUpdateData[key as keyof typeof cleanUpdateData] === undefined) {
+        delete cleanUpdateData[key as keyof typeof cleanUpdateData];
       }
     });
 
@@ -366,12 +369,6 @@ export class IssuesService {
     // Get all issues with their relationships
     const issues = await this.prisma.issue.findMany({
       where: whereClause,
-      include: {
-        children: {
-          where: { deletedAt: null },
-          select: { id: true }
-        }
-      },
       orderBy: [
         { priority: 'desc' },
         { title: 'asc' }
@@ -452,7 +449,7 @@ export class IssuesService {
     const dateRange = this.calculateProjectDateRange(tasks);
 
     // Dependencies would be fetched from a separate table in a real implementation
-    const dependencies = []; // TODO: Implement dependency fetching
+    const dependencies: any[] = []; // TODO: Implement dependency fetching
 
     return {
       tasks,
