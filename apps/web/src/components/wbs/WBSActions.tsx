@@ -56,6 +56,7 @@ export const WBSActions: React.FC<WBSActionsProps> = ({ projectId, onRefresh }) 
         
         <div className="flex items-center gap-3">
           <Button
+            data-testid="wbs-refresh-button"
             variant="outline"
             size="sm"
             onClick={handleRefresh}
@@ -69,6 +70,7 @@ export const WBSActions: React.FC<WBSActionsProps> = ({ projectId, onRefresh }) 
           </Button>
           
           <Button
+            data-testid="wbs-filter-button"
             variant="outline"
             size="sm"
             onClick={() => setShowFilters(!showFilters)}
@@ -87,6 +89,7 @@ export const WBSActions: React.FC<WBSActionsProps> = ({ projectId, onRefresh }) 
           <div className="relative">
             <MagnifyingGlassIcon className="w-5 h-5 absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400" />
             <input
+              data-testid="wbs-search-input"
               type="text"
               placeholder="タスクを検索..."
               value={searchQuery}
@@ -98,6 +101,7 @@ export const WBSActions: React.FC<WBSActionsProps> = ({ projectId, onRefresh }) 
           {/* Expand/Collapse Actions */}
           <div className="flex items-center gap-2">
             <Button
+              data-testid="wbs-expand-all-button"
               variant="ghost"
               size="sm"
               onClick={handleExpandAll}
@@ -108,6 +112,7 @@ export const WBSActions: React.FC<WBSActionsProps> = ({ projectId, onRefresh }) 
             </Button>
             
             <Button
+              data-testid="wbs-collapse-all-button"
               variant="ghost"
               size="sm"
               onClick={handleCollapseAll}

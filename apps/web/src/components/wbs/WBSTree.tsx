@@ -31,7 +31,7 @@ const WBSTreeItem: React.FC<{
   if (!node) return null
   
   return (
-    <div style={style}>
+    <div style={style} data-testid="wbs-node-item">
       <WBSNode
         node={node}
         level={node.level}
@@ -156,7 +156,7 @@ export const WBSTree: React.FC<WBSTreeProps> = ({
   }
 
   return (
-    <div className={`flex flex-col bg-white rounded-lg shadow overflow-hidden ${className}`}>
+    <div data-testid="wbs-tree-container" className={`flex flex-col bg-white rounded-lg shadow overflow-hidden ${className}`}>
       {/* Actions Header */}
       <WBSActions projectId={projectId} onRefresh={handleRefresh} />
       
@@ -186,7 +186,7 @@ export const WBSTree: React.FC<WBSTreeProps> = ({
       </div>
       
       {/* Status Bar */}
-      <div className="border-t border-gray-200 px-6 py-2 bg-gray-50 text-sm text-gray-600">
+      <div data-testid="wbs-status-bar" className="border-t border-gray-200 px-6 py-2 bg-gray-50 text-sm text-gray-600">
         <div className="flex justify-between items-center">
           <span>
             {visibleNodes.length} / {selectors.treeStats().totalNodes} タスク表示中
