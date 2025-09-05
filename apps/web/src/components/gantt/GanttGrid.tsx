@@ -41,7 +41,7 @@ export const GanttGrid = memo<GanttGridProps>(({
     const endDate = new Date(config.endDate)
     const today = new Date()
     
-    let currentDate = new Date(startDate)
+    const currentDate = new Date(startDate)
     
     while (currentDate <= endDate) {
       const x = timeScale(currentDate) || 0
@@ -139,7 +139,7 @@ export const GanttGrid = memo<GanttGridProps>(({
         const { timeScale } = viewport
         
         if (config.scale === 'day') {
-          let currentDate = new Date(config.startDate)
+          const currentDate = new Date(config.startDate)
           const endDate = config.endDate
           
           while (currentDate <= endDate) {
