@@ -18,6 +18,7 @@ interface GanttBarProps {
   isSelected: boolean
   onClick: (task: GanttTask) => void
   schedulingInfo?: SchedulingInfo
+  'data-testid'?: string
 }
 
 export const GanttBar = memo<GanttBarProps>(({ 
@@ -28,7 +29,8 @@ export const GanttBar = memo<GanttBarProps>(({
   height, 
   isSelected, 
   onClick,
-  schedulingInfo
+  schedulingInfo,
+  'data-testid': dataTestId
 }) => {
   const progressWidth = (width * task.progress) / 100
   
@@ -58,7 +60,11 @@ export const GanttBar = memo<GanttBarProps>(({
   const hasSlack = schedulingInfo?.slackDays && schedulingInfo.slackDays > 0
   
   return (
-    <g onClick={() => onClick(task)} className="cursor-pointer">
+    <g 
+      onClick={() => onClick(task)} 
+      className="cursor-pointer task-bar gantt-task"
+      data-testid={dataTestId || "task-bar"}
+    >
       {/* Main task bar */}
       <rect
         x={x}

@@ -24,6 +24,7 @@ interface TaskRowData {
   selectedTaskIds: Set<string>
   onTaskClick: (task: GanttTask) => void
   visibleRowRange: { startIndex: number; endIndex: number }
+  dataTestId?: string
 }
 
 interface GridLine {
@@ -44,7 +45,7 @@ const TaskRow: React.FC<{
   style: React.CSSProperties
   data: TaskRowData
 }> = memo(({ index, style, data }) => {
-  const { tasks, viewport, selectedTaskIds, onTaskClick } = data
+  const { tasks, viewport, selectedTaskIds, onTaskClick, dataTestId } = data
   const task = tasks[index]
 
   if (!task) return null
@@ -74,6 +75,7 @@ const TaskRow: React.FC<{
           height={viewport.taskHeight}
           isSelected={isSelected}
           onClick={onTaskClick}
+          data-testid={dataTestId ? `${dataTestId}-task-${task.id}` : "task-bar"}
         />
       </svg>
     </div>
@@ -240,8 +242,9 @@ export const VirtualizedGanttGrid = memo<VirtualizedGanttGridProps>(
         selectedTaskIds,
         onTaskClick,
         visibleRowRange: { startIndex: 0, endIndex: tasks.length },
+        dataTestId,
       }),
-      [tasks, config, viewport, selectedTaskIds, onTaskClick]
+      [tasks, config, viewport, selectedTaskIds, onTaskClick, dataTestId]
     )
 
     /**
