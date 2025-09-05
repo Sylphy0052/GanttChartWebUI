@@ -7,6 +7,7 @@ import { PrismaModule } from './prisma/prisma.module';
 import { AuthModule } from './auth/auth.module';
 import { IssuesModule } from './issues/issues.module';
 import { ProjectsModule } from './projects/projects.module';
+import { SchedulingModule } from './scheduling/scheduling.module';
 import { JwtAuthGuard } from './auth/guards/jwt.guard';
 
 @Module({
@@ -19,6 +20,7 @@ import { JwtAuthGuard } from './auth/guards/jwt.guard';
     AuthModule,
     IssuesModule,
     ProjectsModule,
+    SchedulingModule,
   ],
   controllers: [AppController],
   providers: [

@@ -8,50 +8,57 @@ generator client {
 }
 
 model Project {
-  id           String   @id @default(uuid())
-  name         String
-  visibility   String   @default("private") // 'private'|'password'|'public'
-  passwordHash String?  @map("password_hash")
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id                    String   @id @default(uuid())
+  name                  String
+  visibility            String   @default("private") // 'private'|'password'|'public'
+  passwordHash          String?  @map("password_hash")
+  schedulingEnabled     Boolean  @default(true)
+  defaultConstraints    Json?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
   
-  issues       Issue[]
-  dependencies Dependency[]
-  calendars    Calendar[]
-  activityLogs ActivityLog[]
+  issues            Issue[]
+  dependencies      Dependency[]
+  calendars         Calendar[]
+  activityLogs      ActivityLog[]
+  computedSchedules ComputedSchedule[]
   
   @@index([visibility])
 }
 
 model Issue {
-  id            String    @id @default(uuid())
-  projectId     String
-  parentIssueId String?
-  title         String
-  description   String    @default("")
-  status        String    // todo|doing|blocked|review|done
-  type          String    // feature|bug|spike|chore
-  priority      Int       // 1..10
-  estimateValue Int
-  estimateUnit  String    // h|d
-  spent         Int       @default(0)
-  assigneeId    String?
-  startDate     DateTime?
-  dueDate       DateTime?
-  progress      Int       @default(0)
-  labels        String[]
-  version       Int       @default(1)
-  deletedAt     DateTime?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  id              String    @id @default(uuid())
+  projectId       String
+  parentIssueId   String?
+  title           String
+  description     String    @default("")
+  status          String    // todo|doing|blocked|review|done
+  type            String    // feature|bug|spike|chore
+  priority        Int       // 1..10
+  estimateValue   Int
+  estimateUnit    String    // h|d
+  spent           Int       @default(0)
+  assigneeId      String?
+  startDate       DateTime?
+  dueDate         DateTime?
+  progress        Int       @default(0)
+  labels          String[]
+  version         Int       @default(1)
+  lastScheduledAt DateTime?
+  scheduleLocked  Boolean   @default(false)
+  floatTime       Int       @default(0)
+  deletedAt       DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
   
-  project      Project  @relation(fields: [projectId], references: [id])
-  parentIssue  Issue?   @relation("IssueHierarchy", fields: [parentIssueId], references: [id])
-  childIssues  Issue[]  @relation("IssueHierarchy")
+  project          Project               @relation(fields: [projectId], references: [id])
+  parentIssue      Issue?                @relation("IssueHierarchy", fields: [parentIssueId], references: [id])
+  childIssues      Issue[]               @relation("IssueHierarchy")
   
-  predecessors Dependency[] @relation("PredecessorIssue")
-  successors   Dependency[] @relation("SuccessorIssue")
-  activityLogs ActivityLog[]
+  predecessors     Dependency[]          @relation("PredecessorIssue")
+  successors       Dependency[]          @relation("SuccessorIssue")
+  activityLogs     ActivityLog[]
+  scheduleHistory  TaskScheduleHistory[]
   
   @@index([projectId, parentIssueId])
   @@index([projectId, updatedAt(sort: Desc)])
@@ -112,4 +119,54 @@ model ActivityLog {
   @@index([projectId, createdAt(sort: Desc)])
   @@index([projectId, entityType, entityId])
   @@index([projectId, actor])
+}
+
+model ComputedSchedule {
+  id                String   @id @default(uuid())
+  projectId         String
+  calculatedAt      DateTime @default(now())
+  calculatedBy      String   // User ID
+  algorithm         String   // 'cpm' | 'simple'
+  
+  originalEndDate   DateTime
+  computedEndDate   DateTime
+  totalDuration     Int      // days
+  
+  constraints       Json     // ScheduleConstraints
+  taskSchedules     Json     // TaskSchedule[]
+  criticalPath      String[] // Task IDs
+  conflicts         Json     // ConflictInfo[]
+  
+  applied           Boolean  @default(false)
+  appliedAt         DateTime?
+  rollbackId        String?
+  
+  project           Project  @relation(fields: [projectId], references: [id])
+  taskHistory       TaskScheduleHistory[]
+  
+  @@map("computed_schedules")
+  @@index([projectId, calculatedAt])
+  @@index([projectId, applied])
+}
+
+model TaskScheduleHistory {
+  id                String   @id @default(uuid())
+  taskId            String
+  computedScheduleId String
+  
+  originalStartDate DateTime
+  originalEndDate   DateTime
+  computedStartDate DateTime
+  computedEndDate   DateTime
+  
+  floatTime         Int      // minutes
+  criticalPath      Boolean
+  conflicts         Json     // ConflictInfo[]
+  
+  task              Issue            @relation(fields: [taskId], references: [id])
+  computedSchedule  ComputedSchedule @relation(fields: [computedScheduleId], references: [id])
+  
+  @@map("task_schedule_history") 
+  @@index([taskId, computedScheduleId])
+  @@index([computedScheduleId, criticalPath])
 }
