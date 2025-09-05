@@ -135,6 +135,7 @@ export default function CreateIssuePage() {
           
           <FormField>
             <Input
+              data-testid="issue-title-input"
               label="タイトル"
               type="text"
               name="title"
@@ -150,6 +151,7 @@ export default function CreateIssuePage() {
               説明
             </label>
             <textarea
+              data-testid="issue-description-textarea"
               name="description"
               value={formData.description}
               onChange={handleChange}
@@ -165,6 +167,7 @@ export default function CreateIssuePage() {
                 ステータス <span className="text-red-500">*</span>
               </label>
               <select
+                data-testid="issue-status-select"
                 name="status"
                 value={formData.status}
                 onChange={handleChange}
@@ -184,6 +187,7 @@ export default function CreateIssuePage() {
                 タイプ <span className="text-red-500">*</span>
               </label>
               <select
+                data-testid="issue-type-select"
                 name="type"
                 value={formData.type}
                 onChange={handleChange}
@@ -324,6 +328,7 @@ export default function CreateIssuePage() {
 
           <FormActions>
             <Button
+              data-testid="issue-submit-button"
               type="submit"
               loading={isLoading}
               disabled={!formData.title.trim()}
@@ -332,7 +337,7 @@ export default function CreateIssuePage() {
               作成
             </Button>
             <Link href="/issues" className="flex-1">
-              <Button type="button" variant="outline" className="w-full">
+              <Button data-testid="issue-cancel-button" type="button" variant="outline" className="w-full">
                 キャンセル
               </Button>
             </Link>

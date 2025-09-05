@@ -64,6 +64,7 @@ export default function IssuesPage() {
                 <div className="mt-2 text-sm">{error}</div>
                 <div className="mt-4">
                   <Button 
+                    data-testid="issue-refresh-button"
                     onClick={() => fetchIssues()} 
                     variant="outline" 
                     size="sm"
@@ -137,7 +138,7 @@ export default function IssuesPage() {
           
           <div className="flex space-x-4">
             <Link href="/issues/create">
-              <Button disabled={!isAuthenticated}>
+              <Button data-testid="create-issue-button" disabled={!isAuthenticated}>
                 新しいIssue
               </Button>
             </Link>
@@ -149,6 +150,7 @@ export default function IssuesPage() {
           <form onSubmit={handleSearch} className="flex space-x-2">
             <div className="flex-1">
               <Input
+                data-testid="issue-search-input"
                 type="text"
                 placeholder="Issue を検索..."
                 value={searchTerm}
@@ -188,10 +190,10 @@ export default function IssuesPage() {
             )}
           </div>
         ) : (
-          <div className="bg-white shadow overflow-hidden sm:rounded-lg">
+          <div data-testid="issue-list-container" className="bg-white shadow overflow-hidden sm:rounded-lg">
             <ul className="divide-y divide-gray-200">
               {issues.map((issue) => (
-                <li key={issue.id}>
+                <li key={issue.id} data-testid="issue-list-item">
                   <div className="px-6 py-4 hover:bg-gray-50 cursor-pointer">
                     <Link href={`/issues/${issue.id}`}>
                       <div className="flex items-center justify-between">
