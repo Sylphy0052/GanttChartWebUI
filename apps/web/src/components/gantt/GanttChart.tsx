@@ -8,6 +8,12 @@ import { VirtualizedGanttGrid } from './VirtualizedGanttGrid'
 import { VirtualizedTaskList } from './VirtualizedTaskList'
 import { GanttTask } from '@/types/gantt'
 import { usePerformanceMetrics } from '@/hooks/usePerformanceMetrics'
+import { ScheduleCalculator } from '@/components/scheduling/ScheduleCalculator'
+import { ConflictDetectionPanel } from '@/components/scheduling/ConflictDetectionPanel'
+import { ConflictResolutionDialog } from '@/components/scheduling/ConflictResolutionDialog'
+import { AuditLogViewer } from '@/components/scheduling/AuditLogViewer'
+import { VisualizationLayer } from '@/components/scheduling/VisualizationLayer'
+import { DetectedConflict, ResolutionStrategy } from '@/types/scheduling'
 
 interface GanttChartProps {
   projectId?: string
@@ -22,6 +28,13 @@ export const GanttChart: React.FC<GanttChartProps> = ({
 }) => {
   const containerRef = useRef<HTMLDivElement>(null)
   const [containerSize, setContainerSize] = useState({ width: 1200, height })
+  
+  // Scheduling panel states
+  const [showScheduleCalculator, setShowScheduleCalculator] = useState(false)
+  const [showConflictPanel, setShowConflictPanel] = useState(false)
+  const [showAuditLog, setShowAuditLog] = useState(false)
+  const [conflictsToResolve, setConflictsToResolve] = useState<DetectedConflict[]>([])
+  const [showConflictDialog, setShowConflictDialog] = useState(false)
 
   // Performance monitoring
   const {
@@ -63,6 +76,23 @@ export const GanttChart: React.FC<GanttChartProps> = ({
     zoomToFit,
     scrollToToday
   } = useGanttStore()
+
+  // Scheduling store
+  const {
+    lastCalculationResult,
+  } = useGanttStore()
+  
+  // Local state for scheduling panels (could be moved to store later)  
+  const [conflictsPanelOpen, setConflictsPanelOpen] = useState(false)
+  const [auditLogVisible, setAuditLogVisible] = useState(false)
+  const [detectedConflicts] = useState<DetectedConflict[]>([])
+  const [isScheduleCalculating] = useState(false)
+
+  // Visualization state
+  const [showVisualization, setShowVisualization] = useState(true)
+
+  // Computed values
+  const hasConflicts = detectedConflicts.length > 0
 
   // Optimized selectors
   const selectorState = {
@@ -230,6 +260,59 @@ export const GanttChart: React.FC<GanttChartProps> = ({
         </div>
         
         <div className="flex items-center space-x-2">
+          {/* Scheduling controls */}
+          <div className="flex items-center border border-gray-300 rounded bg-white">
+            <button
+              onClick={() => setShowScheduleCalculator(!showScheduleCalculator)}
+              className={`px-2 py-1 text-xs border-r border-gray-300 transition-colors ${
+                showScheduleCalculator || isScheduleCalculating 
+                  ? 'bg-blue-50 text-blue-700' 
+                  : 'hover:bg-gray-100'
+              }`}
+              title="Schedule Calculator"
+            >
+              {isScheduleCalculating ? '⏳' : '📊'}
+            </button>
+            <button
+              onClick={() => setShowConflictPanel(!showConflictPanel)}
+              className={`px-2 py-1 text-xs border-r border-gray-300 transition-colors relative ${
+                showConflictPanel 
+                  ? 'bg-red-50 text-red-700' 
+                  : 'hover:bg-gray-100'
+              }`}
+              title="Conflicts"
+            >
+              ⚠️
+              {hasConflicts && detectedConflicts.length > 0 && (
+                <span className="absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center">
+                  {detectedConflicts.length}
+                </span>
+              )}
+            </button>
+            <button
+              onClick={() => setShowAuditLog(!showAuditLog)}
+              className={`px-2 py-1 text-xs border-r border-gray-300 transition-colors ${
+                showAuditLog 
+                  ? 'bg-green-50 text-green-700' 
+                  : 'hover:bg-gray-100'
+              }`}
+              title="Audit Log"
+            >
+              📋
+            </button>
+            <button
+              onClick={() => setShowVisualization(!showVisualization)}
+              className={`px-2 py-1 text-xs transition-colors ${
+                showVisualization && lastCalculationResult
+                  ? 'bg-purple-50 text-purple-700' 
+                  : 'hover:bg-gray-100'
+              }`}
+              title="Scheduling Visualization"
+            >
+              🎯
+            </button>
+          </div>
+
           {/* Zoom controls */}
           <div className="flex items-center border border-gray-300 rounded">
             <button
@@ -292,7 +375,7 @@ export const GanttChart: React.FC<GanttChartProps> = ({
         </div>
 
         {/* Gantt chart area */}
-        <div className="flex-1 overflow-auto">
+        <div className="flex-1 overflow-auto relative">
           <div style={{ minWidth: containerSize.width - taskListWidth }}>
             {/* Timeline header */}
             <GanttTimeline
@@ -301,15 +384,31 @@ export const GanttChart: React.FC<GanttChartProps> = ({
               className="sticky top-0 z-10"
             />
 
-            {/* Virtualized Gantt grid */}
-            <VirtualizedGanttGrid
-              tasks={visibleTasks}
-              config={config}
-              viewport={viewport}
-              selectedTaskIds={selectedTaskIds}
-              onTaskClick={handleTaskClick}
-              height={height - 12 - 12} // Total height - toolbar height - timeline height
-            />
+            {/* Gantt grid container with visualization overlay */}
+            <div className="relative">
+              {/* Virtualized Gantt grid */}
+              <VirtualizedGanttGrid
+                tasks={visibleTasks}
+                config={config}
+                viewport={viewport}
+                selectedTaskIds={selectedTaskIds}
+                onTaskClick={handleTaskClick}
+                height={height - 12 - 12} // Total height - toolbar height - timeline height
+              />
+              
+              {/* Scheduling Visualization Layer */}
+              {showVisualization && lastCalculationResult && (
+                <VisualizationLayer
+                  tasks={visibleTasks}
+                  config={config}
+                  viewport={viewport}
+                  schedulingResult={lastCalculationResult}
+                  width={containerSize.width - taskListWidth}
+                  height={height - 12 - 12}
+                  className="z-20"
+                />
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -318,6 +417,61 @@ export const GanttChart: React.FC<GanttChartProps> = ({
       <div className="absolute bottom-4 right-4 text-xs text-gray-500 bg-white px-2 py-1 rounded shadow opacity-75 hover:opacity-100 transition-opacity">
         Ctrl + / - : Zoom | Ctrl 0 : Fit | Ctrl T : Today | ESC : Clear selection
       </div>
+
+      {/* Scheduling Panels */}
+      {showScheduleCalculator && projectId && (
+        <div className="absolute top-12 left-4 bg-white shadow-lg rounded-lg border border-gray-200 z-40">
+          <ScheduleCalculator
+            projectId={projectId}
+            compact={true}
+            onCalculationComplete={() => {
+              // Refresh Gantt data after calculation
+              fetchGanttData(projectId)
+            }}
+          />
+        </div>
+      )}
+
+      {showConflictPanel && projectId && (
+        <div className="absolute top-12 right-4 bg-white shadow-lg rounded-lg border border-gray-200 z-40 max-w-md">
+          <ConflictDetectionPanel
+            projectId={projectId}
+            onResolutionRequested={(conflicts: DetectedConflict[], strategy: ResolutionStrategy) => {
+              setConflictsToResolve(conflicts)
+              setShowConflictDialog(true)
+            }}
+          />
+        </div>
+      )}
+
+      {showAuditLog && projectId && (
+        <div className="absolute top-12 left-1/2 transform -translate-x-1/2 bg-white shadow-lg rounded-lg border border-gray-200 z-40 max-w-2xl">
+          <AuditLogViewer
+            projectId={projectId}
+            compact={true}
+          />
+        </div>
+      )}
+
+      {/* Conflict Resolution Dialog */}
+      {showConflictDialog && conflictsToResolve.length > 0 && projectId && (
+        <ConflictResolutionDialog
+          projectId={projectId}
+          conflicts={conflictsToResolve}
+          isOpen={showConflictDialog}
+          onClose={() => {
+            setShowConflictDialog(false)
+            setConflictsToResolve([])
+          }}
+          onResolved={(result) => {
+            setShowConflictDialog(false)
+            setConflictsToResolve([])
+            // Refresh Gantt data after conflict resolution
+            fetchGanttData(projectId)
+          }}
+          userId="current-user" // TODO: Get actual user ID
+        />
+      )}
     </div>
   )
 }

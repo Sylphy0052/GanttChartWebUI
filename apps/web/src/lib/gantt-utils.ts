@@ -36,6 +36,8 @@ export class GanttUtils {
           id: dep.id,
           predecessorId: dep.predecessorId,
           successorId: dep.successorId,
+          fromTaskId: dep.predecessorId,  // alias for predecessorId
+          toTaskId: dep.successorId,      // alias for successorId
           type: dep.type,
           lag: dep.lag,
           lagUnit: dep.lagUnit

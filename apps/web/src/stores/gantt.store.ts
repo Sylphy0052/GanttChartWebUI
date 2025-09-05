@@ -1,8 +1,12 @@
 import { create } from 'zustand'
-import { devtools, persist } from 'zustand/middleware'
+import { devtools } from 'zustand/middleware'
 import { scaleTime, scaleBand } from 'd3-scale'
-import { GanttStore, GanttTask, GanttTimeScale, GanttViewport, GanttTimelineConfig } from '@/types/gantt'
+import { GanttStore, GanttTask, GanttTimeScale, GanttViewport, GanttTimelineConfig, GanttConfig } from '@/types/gantt'
 import { GanttUtils } from '@/lib/gantt-utils'
+import { SchedulingResult } from '@/types/scheduling'
+
+// Re-export types needed by other components
+export type { GanttConfig, GanttViewport } from '@/types/gantt'
 
 interface GanttState {
   tasks: GanttTask[]
@@ -13,22 +17,25 @@ interface GanttState {
   expandedTaskIds: Set<string>
   loading: boolean
   error?: string
+  lastCalculationResult?: SchedulingResult
 }
 
 export const useGanttStore = create<GanttStore>()(
   devtools(
-    persist(
-      (set, get) => ({
-        // State
-        tasks: [],
-        dependencies: [],
+    (set, get) => ({
+      // State
+      tasks: [],
+      dependencies: [],
         config: {
           scale: 'day',
           startDate: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
           endDate: new Date(Date.now() + 90 * 24 * 60 * 60 * 1000),
           workingDays: [1, 2, 3, 4, 5], // Mon-Fri
           workingHoursPerDay: 8,
-          holidays: []
+          holidays: [],
+          rowHeight: 40,
+          taskHeight: 24,
+          headerHeight: 60
         },
         viewport: {
           startDate: new Date(),
@@ -39,7 +46,11 @@ export const useGanttStore = create<GanttStore>()(
           height: 600,
           rowHeight: 40,
           taskHeight: 24,
-          headerHeight: 60
+          headerHeight: 60,
+          getDatePosition: (date: Date) => {
+            const { viewport } = get()
+            return viewport.timeScale(date) || 0
+          }
         },
         interaction: {
           isDragging: false,
@@ -51,6 +62,7 @@ export const useGanttStore = create<GanttStore>()(
         expandedTaskIds: new Set<string>(),
         loading: false,
         error: undefined,
+        lastCalculationResult: undefined,
 
         // Actions
         setTasks: (tasks: GanttTask[]) => {
@@ -271,32 +283,12 @@ export const useGanttStore = create<GanttStore>()(
             viewport: { ...state.viewport, width, height }
           }))
           get().updateViewport()
+        },
+
+        setLastCalculationResult: (result: SchedulingResult | undefined) => {
+          set({ lastCalculationResult: result })
         }
-      }),
-      {
-        name: 'gantt-store',
-        partialize: (state) => ({
-          config: state.config,
-          selectedTaskId: state.selectedTaskId,
-          selectedTaskIds: Array.from(state.selectedTaskIds),
-          expandedTaskIds: Array.from(state.expandedTaskIds)
-        }),
-        onRehydrateStorage: () => (state) => {
-          if (state) {
-            // Convert arrays back to sets
-            if (Array.isArray(state.selectedTaskIds)) {
-              state.selectedTaskIds = new Set(state.selectedTaskIds)
-            }
-            if (Array.isArray(state.expandedTaskIds)) {
-              state.expandedTaskIds = new Set(state.expandedTaskIds)
-            }
-          }
-        }
-      }
-    ),
-    {
-      name: 'gantt-store'
-    }
+      })
   )
 )
 
@@ -385,3 +377,4 @@ export const useGanttSelectors = () => {
     }
   }
 }
+

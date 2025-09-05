@@ -1,4 +1,5 @@
 import { ScaleTime, ScaleBand } from 'd3-scale'
+import { SchedulingResult } from './scheduling'
 
 export type GanttTimeScale = 'day' | 'week' | 'month' | 'quarter'
 
@@ -28,18 +29,14 @@ export interface GanttDependency {
   id: string
   predecessorId: string
   successorId: string
+  fromTaskId: string  // alias for predecessorId
+  toTaskId: string    // alias for successorId
   type: 'FS' | 'SS' | 'FF' | 'SF'
   lag: number
   lagUnit: 'days' | 'hours'
 }
 
-export interface GanttTimelineConfig {
-  scale: GanttTimeScale
-  startDate: Date
-  endDate: Date
-  workingDays: number[]
-  workingHoursPerDay: number
-  holidays: Date[]
+export interface GanttTimelineConfig extends GanttConfig {
 }
 
 export interface GanttViewport {
@@ -52,6 +49,7 @@ export interface GanttViewport {
   rowHeight: number
   taskHeight: number
   headerHeight: number
+  getDatePosition: (date: Date) => number
 }
 
 export interface GanttInteraction {
@@ -74,6 +72,7 @@ export interface GanttState {
   expandedTaskIds: Set<string>
   loading: boolean
   error?: string
+  lastCalculationResult?: SchedulingResult
 }
 
 export interface GanttActions {
@@ -97,6 +96,7 @@ export interface GanttActions {
   fetchGanttData: (projectId?: string) => Promise<void>
   setViewportSize: (width: number, height: number) => void
   updateViewport: () => void
+  setLastCalculationResult: (result: SchedulingResult | undefined) => void
 }
 
 export type GanttStore = GanttState & GanttActions
@@ -113,6 +113,18 @@ export interface GanttGridLine {
   x: number
   date: Date
   label?: string
+}
+
+export interface GanttConfig {
+  scale: GanttTimeScale
+  startDate: Date
+  endDate: Date
+  workingDays: number[]
+  workingHoursPerDay: number
+  holidays: Date[]
+  rowHeight: number
+  taskHeight: number
+  headerHeight: number
 }
 
 export interface GanttTooltipData {
