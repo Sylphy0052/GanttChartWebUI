@@ -1,38 +1,22 @@
-'use client'
+import React, { Suspense } from 'react'
+import dynamic from 'next/dynamic'
 
-import React, { useEffect, useState } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
-import { GanttChart } from '@/components/gantt/GanttChart'
+// Dynamically import the client-side GanttChart component
+const GanttChartClient = dynamic(() => import('@/components/gantt/GanttChartClient'), {
+  ssr: false,
+  loading: () => (
+    <div className="flex items-center justify-center h-96">
+      <div className="text-lg">Loading Gantt Chart...</div>
+    </div>
+  ),
+})
 
 export default function GanttPage() {
-  const router = useRouter()
-  const searchParams = useSearchParams()
-  const projectId = searchParams.get('projectId') || undefined
-  
-  // Calculate available height for the chart
-  const [chartHeight, setChartHeight] = useState(600)
-  
-  useEffect(() => {
-    const calculateHeight = () => {
-      const windowHeight = window.innerHeight
-      const headerHeight = 64 // Approximate header height
-      const padding = 32
-      setChartHeight(windowHeight - headerHeight - padding)
-    }
-    
-    calculateHeight()
-    window.addEventListener('resize', calculateHeight)
-    
-    return () => window.removeEventListener('resize', calculateHeight)
-  }, [])
-
   return (
     <div className="container mx-auto p-4">
-      <GanttChart 
-        projectId={projectId}
-        height={chartHeight}
-        className="w-full"
-      />
+      <Suspense fallback={<div className="text-center">Loading...</div>}>
+        <GanttChartClient />
+      </Suspense>
     </div>
   )
 }
