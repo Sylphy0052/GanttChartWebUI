@@ -404,7 +404,7 @@ export const GanttChart: React.FC<GanttChartProps> = ({
                 selectedTaskIds={selectedTaskIds}
                 onTaskClick={handleTaskClick}
                 height={height - 12 - 12} // Total height - toolbar height - timeline height
-                data-testid="gantt-chart-grid"
+                data-testid=""
               />
               
               {/* Scheduling Visualization Layer */}
