@@ -1,0 +1,95 @@
+name: E2E Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+
+jobs:
+  e2e-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps
+
+      - name: Build application
+        run: npx turbo run build
+
+      - name: Start development server
+        run: npm run dev &
+        working-directory: apps/web
+
+      - name: Wait for server to be ready
+        run: npx wait-on http://localhost:3000 --timeout 60000
+
+      - name: Run E2E tests
+        run: npx turbo run e2e
+        env:
+          CI: true
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report-${{ matrix.browser }}
+          path: apps/web/playwright-report/
+          retention-days: 7
+
+      - name: Upload test videos
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-videos-${{ matrix.browser }}
+          path: apps/web/test-results/
+          retention-days: 3
+
+      - name: Comment PR with test results
+        uses: actions/github-script@v7
+        if: github.event_name == 'pull_request' && always()
+        with:
+          script: |
+            const fs = require('fs');
+            const path = 'apps/web/playwright-report/results.json';
+            
+            if (fs.existsSync(path)) {
+              const results = JSON.parse(fs.readFileSync(path, 'utf8'));
+              const passed = results.suites.reduce((acc, suite) => acc + suite.specs.filter(spec => spec.ok).length, 0);
+              const total = results.suites.reduce((acc, suite) => acc + suite.specs.length, 0);
+              const successRate = ((passed / total) * 100).toFixed(1);
+              
+              const body = `## 🧪 E2E Test Results
+              
+              **Browser**: ${{ matrix.browser }}
+              **Success Rate**: ${successRate}% (${passed}/${total} tests)
+              
+              ${passed === total ? '✅ All tests passed!' : '❌ Some tests failed. Check the detailed report.'}
+              
+              [View detailed report](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})`;
+              
+              github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: body
+              });
+            }
