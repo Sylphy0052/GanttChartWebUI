@@ -1,6 +1,98 @@
 {
-"phase": null,
-"current_task": null,
-"next_tasks": [],
-"log": []
+  "phase": "plan",
+  "current_sprint": "Phase 0",
+  "next_tasks": [
+    {
+      "id": "task_001",
+      "title": "環境整備・ベース合意",
+      "description": "Docker Compose環境構築、Prisma初期化、基本開発環境のセットアップ",
+      "priority": "high",
+      "estimated_hours": 4,
+      "status": "pending",
+      "sprint": "Phase 0"
+    },
+    {
+      "id": "task_002", 
+      "title": "Prismaモデリング（Project/Issue/Dependency/ActivityLog）",
+      "description": "データモデルをPrismaスキーマで実装し、マイグレーション作成",
+      "priority": "high",
+      "estimated_hours": 6,
+      "status": "pending",
+      "sprint": "Sprint 1"
+    },
+    {
+      "id": "task_003",
+      "title": "認証・RBAC簡易実装",
+      "description": "OIDCダミー認証とプロジェクト単位の基本権限制御を実装",
+      "priority": "high", 
+      "estimated_hours": 4,
+      "status": "pending",
+      "sprint": "Sprint 1"
+    },
+    {
+      "id": "task_004",
+      "title": "Issues API実装（CRUD）",
+      "description": "GET/POST/PATCH/DELETE エンドポイント実装、ETag/If-Match、cursor pagination対応",
+      "priority": "high",
+      "estimated_hours": 8,
+      "status": "pending",
+      "sprint": "Sprint 1"
+    },
+    {
+      "id": "task_005",
+      "title": "フロントエンド基盤構築",
+      "description": "Next.js レイアウト、ルーティング、プロジェクト選択UI、状態管理（Zustand）セットアップ",
+      "priority": "high",
+      "estimated_hours": 6,
+      "status": "pending", 
+      "sprint": "Sprint 1"
+    }
+  ],
+  "completed_tasks": [],
+  "blocked_tasks": [],
+  "kpis": {
+    "initial_render_ms_p95": 1500,
+    "drag_latency_ms_p95": 100,
+    "current_measurements": {}
+  },
+  "current_scope": {
+    "include": [
+      "Issue CRUD（タイトル/説明/担当/ステータス/期限）",
+      "Issue一覧（テーブル）＋詳細サイドパネル",
+      "WBS: 親子階層表示、ドラッグ&ドロップで並び替え/階層変更",
+      "ガント: バー表示、バー移動/伸縮（自由移動）、FS依存の追加/削除、Todayライン",
+      "進捗: Leafは％手入力、Parentは子集計",
+      "Undo/Redo: Ctrl/Cmd+Z / Ctrl/Cmd+Y",
+      "カレンダー: 平日稼働・祝日なし、1日=8h固定",
+      "監査ログ: Issue作成/更新/削除、ガント操作のみ記録"
+    ],
+    "exclude": [
+      "通知（Slack/メール/In‑App）、共有リンク、PNG/PDF/Excel/CSV出力",
+      "バックアップ/復元、複数カレンダー/タイムゾーン",
+      "RBACの細分化（Owner/Admin/Viewerの簡易のみ）",
+      "％＋実工数表示切替、Blocked自動反映、クリティカルパス表示",
+      "i18n、リアルタイム共同編集"
+    ]
+  },
+  "acceptance_criteria": [
+    "1,000 Issueのダミーデータで、ガント初回描画 < 1.5s、ドラッグ応答 < 100ms",
+    "WBSとガントの縦スクロールが同期し、階層変更が即時ガントに反映される",
+    "FS依存を追加/削除でき、先行移動で後続の開始日が自動調整される", 
+    "Undo/Redoがバー移動・伸縮・依存作成/削除・Issue編集に対して動作する",
+    "主要操作（drag/resize/dependency/undo）がテレメトリに記録される"
+  ],
+  "demo_scenarios": [
+    "シナリオA: 5件のIssueでWBS作成→ガントで期間調整→依存設定→Undo/Redo",
+    "シナリオB: 先行タスクを+2日、後続が+2日へ連鎖→Todayラインで進捗を％更新",
+    "シナリオC: 親に子を2件配下へ移動→親の期間/進捗が自動ロールアップ"
+  ],
+  "risks": [
+    "ガント性能が出ない → 仮想スクロール/差分描画",
+    "Undo/Redo複雑化 → コマンドパターン+履歴スタック", 
+    "依存作図UX難 → 端スナップ＋ツールチップ",
+    "スケジューリング遅延 → 影響範囲のみ再計算、WebWorker検討",
+    "仕様ブレ → 週次レビュー、仕様差分は即ドキュメント反映"
+  ],
+  "log": [],
+  "last_updated": "2025-09-06T00:00:00Z"
 }
