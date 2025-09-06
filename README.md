@@ -201,6 +201,130 @@ npm run type-check
 npm run lint
 ```
 
+## CI/CD & E2E Testing
+
+### GitHub Actions 自動テスト
+
+このプロジェクトでは、GitHub ActionsによるCI/CDパイプラインが設定されており、Pull RequestやPushの際に自動的にE2Eテストが実行されます。
+
+#### 自動実行されるテスト
+
+- **E2E Tests**: Playwright使用、Chromiumで12テスト実行
+- **Environment**: Ubuntu-latest + Node.js 22.x + 自動browser dependencies
+- **Success Criteria**: 全テスト通過でmerge許可
+
+#### テスト結果の確認
+
+1. **Pull Request**: 自動でテスト結果がPRコメントに投稿
+2. **GitHub Actions**: Actions タブで詳細ログ確認可能
+3. **Artifacts**: 失敗時のスクリーンショット・動画保存
+
+### ローカルE2E テスト実行
+
+#### 前提条件
+
+```bash
+# Playwright browser dependencies (開発環境)
+npx playwright install --with-deps
+```
+
+#### テスト実行コマンド
+
+```bash
+# 全E2Eテスト実行
+npm run e2e
+
+# UIモードでテスト実行 (デバッグ用)
+npm run e2e:ui
+
+# 特定ブラウザでのみ実行
+npx playwright test --project=chromium
+
+# クリティカルテストのみ実行
+npm run e2e:critical
+```
+
+#### E2Eテスト設定
+
+- **Test Directory**: `apps/web/e2e/`
+- **Config**: `apps/web/playwright.config.ts`
+- **Base URL**: 
+  - Local: `http://localhost:3001` 
+  - CI: `http://localhost:3000`
+- **Browsers**: Chromium (primary), Firefox, Safari (local only)
+
+### Development Workflow
+
+#### Pull Request フロー
+
+1. Feature branchでの開発
+2. Pull Request作成
+3. **自動E2Eテスト実行** (GitHub Actions)
+4. テスト成功 → Merge可能
+5. テスト失敗 → 修正が必要
+
+#### ローカル開発フロー
+
+```bash
+# 開発サーバー起動
+npm run dev
+
+# E2Eテスト実行で品質確認
+npm run e2e
+
+# 修正後、再テスト
+npm run e2e:critical  # 重要機能のみ高速確認
+```
+
+### テスト対象機能
+
+#### Core E2E Scenarios
+
+1. **Application Loading**: アプリケーション基本読み込み
+2. **Issue Management**: Issue CRUD操作
+3. **WBS Operations**: 階層構造・並び替え機能
+4. **Gantt Operations**: ガントチャート表示・編集機能
+5. **Navigation**: ページ間遷移・メニュー操作
+
+#### 成功率目標
+
+- **Production Target**: 100% (12/12 tests)
+- **Current Status**: Phase 6.2.6で91.7% → 100%達成済み
+
+### Troubleshooting E2E Tests
+
+#### ローカル環境での問題
+
+```bash
+# Browser dependencies不足の場合
+npx playwright install --with-deps
+
+# Port競合の場合
+pkill -f "node.*3001"  # 開発サーバー停止
+npm run dev            # 再起動
+
+# Cache問題の場合
+rm -rf apps/web/.next
+rm -rf apps/web/playwright-report
+npm run build
+```
+
+#### CI環境での問題
+
+- **Test失敗**: Actions logs確認、スクリーンショット・動画をArtifactsからダウンロード
+- **Timeout**: CI環境は自動的にretry (最大2回)
+- **Manual Re-run**: GitHubのActions画面から手動再実行可能
+
+#### 環境差異の確認
+
+```bash
+# ローカル設定確認
+cat apps/web/playwright.config.ts
+
+# CI環境用設定確認
+cat .github/workflows/e2e-tests.yml
+```
+
 ## トラブルシューティング
 
 ### Docker関連
