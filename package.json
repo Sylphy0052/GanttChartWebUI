@@ -12,7 +12,10 @@
     "test": "turbo run test",
     "lint": "turbo run lint",
     "type-check": "turbo run type-check",
-    "seed": "cd apps/api && npm run seed"
+    "seed": "cd apps/api && npm run seed",
+    "db:reset": "cd apps/api && npm run db:reset",
+    "prisma:generate": "cd apps/api && npm run prisma:generate",
+    "prisma:migrate": "cd apps/api && npm run prisma:migrate"
   },
   "devDependencies": {
     "@types/node": "^20.19.13",
