@@ -1,0 +1,277 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+// User model for authentication and user management
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  name      String
+  avatarUrl String?  @map("avatar_url")
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  
+  // Relations
+  memberships      ProjectMember[]
+  createdIssues    Issue[]         @relation("IssueCreator")
+  assignedIssues   Issue[]         @relation("IssueAssignee")  
+  activityLogs     ActivityLog[]   @relation("ActivityActor")
+  computedSchedules ComputedSchedule[] @relation("ScheduleCalculator")
+  
+  @@map("users")
+}
+
+// Project membership with role-based access control
+model ProjectMember {
+  id        String   @id @default(uuid())
+  projectId String   @map("project_id")
+  userId    String   @map("user_id")
+  role      String   // owner|admin|member|viewer
+  invitedAt DateTime @default(now()) @map("invited_at")
+  joinedAt  DateTime @default(now()) @map("joined_at")
+  isActive  Boolean  @default(true) @map("is_active")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+  
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@unique([projectId, userId])
+  @@index([projectId, role])
+  @@index([userId])
+  @@map("project_members")
+}
+
+model Project {
+  id                    String   @id @default(uuid())
+  name                  String
+  visibility            String   @default("private") // 'private'|'password'|'public'
+  passwordHash          String?  @map("password_hash")
+  calendarId            String?  @map("calendar_id")
+  schedulingEnabled     Boolean  @default(true)
+  defaultConstraints    Json?    // settings field from spec
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+  
+  calendar          Calendar?           @relation("ProjectCalendar", fields: [calendarId], references: [id])
+  issues            Issue[]
+  dependencies      Dependency[]
+  calendars         Calendar[]          @relation("ProjectCalendars")
+  activityLogs      ActivityLog[]
+  computedSchedules ComputedSchedule[]
+  milestones        Milestone[]
+  wbsNodes          WBSNode[]
+  members           ProjectMember[]
+  
+  @@index([visibility])
+  @@map("projects")
+}
+
+model Issue {
+  id              String    @id @default(uuid())
+  projectId       String    @map("project_id")
+  parentIssueId   String?   @map("parent_issue_id")
+  orderIndex      Int       @default(0) @map("order_index") // For WBS hierarchical ordering
+  title           String
+  description     String    @default("") // Markdown support
+  status          String    // todo|doing|blocked|review|done
+  type            String    // feature|bug|spike|chore
+  priority        Int       // 1..10 (constraint enforced in business logic)
+  estimateValue   Int       @map("estimate_value")
+  estimateUnit    String    @map("estimate_unit") // h|d
+  spent           Int       @default(0) // hours spent
+  assigneeId      String?   @map("assignee_id")
+  startDate       DateTime? @map("start_date")
+  dueDate         DateTime? @map("due_date")
+  progress        Int       @default(0) // 0-100 (constraint enforced in business logic)
+  labels          String[]
+  relations       Json?     // Additional issue relations
+  attachments     Json?     // File attachments metadata
+  externalLinks   Json?     @map("external_links") // External URLs/integrations
+  milestoneId     String?   @map("milestone_id")
+  closedAt        DateTime? @map("closed_at")
+  createdBy       String    @map("created_by") // User ID who created the issue
+  version         Int       @default(1)
+  lastScheduledAt DateTime? @map("last_scheduled_at")
+  scheduleLocked  Boolean   @default(false) @map("schedule_locked")
+  floatTime       Int       @default(0) @map("float_time")
+  deletedAt       DateTime? @map("deleted_at") // Soft delete for logical deletion
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  
+  project          Project               @relation(fields: [projectId], references: [id])
+  parentIssue      Issue?                @relation("IssueHierarchy", fields: [parentIssueId], references: [id])
+  childIssues      Issue[]               @relation("IssueHierarchy")
+  milestone        Milestone?            @relation(fields: [milestoneId], references: [id])
+  creator          User                  @relation("IssueCreator", fields: [createdBy], references: [id])
+  assignee         User?                 @relation("IssueAssignee", fields: [assigneeId], references: [id])
+  
+  predecessors     Dependency[]          @relation("PredecessorIssue")
+  successors       Dependency[]          @relation("SuccessorIssue")
+  activityLogs     ActivityLog[]
+  scheduleHistory  TaskScheduleHistory[]
+  wbsNode          WBSNode?
+  
+  @@index([projectId, parentIssueId])
+  @@index([projectId, parentIssueId, orderIndex]) // For WBS hierarchical queries
+  @@index([projectId, updatedAt(sort: Desc)])
+  @@index([projectId, dueDate])
+  @@index([assigneeId, status])
+  @@index([milestoneId])
+  @@index([deletedAt]) // For soft delete queries
+  @@index([createdBy])
+  @@unique([projectId, parentIssueId, orderIndex]) // Ensure unique ordering within parent
+  @@map("issues")
+}
+
+model WBSNode {
+  id        String  @id @default(uuid())
+  issueId   String  @unique @map("issue_id") // 1Issue=1Node constraint
+  parent    String? // Parent WBS node ID (can be null for root)
+  sortIndex Int     @map("sort_index") // Unique within same parent
+  projectId String  @map("project_id") // For easier querying
+  
+  issue     Issue   @relation(fields: [issueId], references: [id])
+  project   Project @relation(fields: [projectId], references: [id])
+  
+  @@unique([parent, sortIndex]) // Unique sort_index within same parent
+  @@index([projectId, parent])
+  @@map("wbs_nodes")
+}
+
+model Dependency {
+  id            String   @id @default(uuid())
+  projectId     String   @map("project_id")
+  predecessorId String   @map("predecessor_id")
+  successorId   String   @map("successor_id")
+  type          String   // FS (Finish-to-Start) for MVP, extendable to SS|SF|FF
+  lag           Int      @default(0) // Lag time in hours/days
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  
+  project     Project @relation(fields: [projectId], references: [id])
+  predecessor Issue   @relation("PredecessorIssue", fields: [predecessorId], references: [id])
+  successor   Issue   @relation("SuccessorIssue", fields: [successorId], references: [id])
+  
+  @@unique([projectId, predecessorId, successorId, type]) // Prevent duplicates
+  @@index([projectId, predecessorId])
+  @@index([projectId, successorId])
+  @@map("dependencies")
+}
+
+model Milestone {
+  id          String    @id @default(uuid())
+  projectId   String    @map("project_id")
+  name        String
+  description String    @default("")
+  dueDate     DateTime  @map("due_date")
+  status      String    @default("active") // active|completed|cancelled
+  color       String?   // Hex color for UI display
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  
+  project Project @relation(fields: [projectId], references: [id])
+  issues  Issue[]
+  
+  @@index([projectId, dueDate])
+  @@index([projectId, status])
+  @@map("milestones")
+}
+
+model Calendar {
+  id           String   @id @default(uuid())
+  projectId    String   @map("project_id")
+  name         String   @default("Default")
+  workingDays  Int[]    @map("working_days") // [1,2,3,4,5] for Mon-Fri
+  holidays     String[] // ["2025-09-15", "2025-12-25"] ISO date format
+  dailyHours   Int      @default(8) @map("daily_hours")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+  
+  project         Project @relation("ProjectCalendars", fields: [projectId], references: [id])
+  projectsUsing   Project[] @relation("ProjectCalendar")
+  
+  @@unique([projectId, name])
+  @@map("calendars")
+}
+
+model ActivityLog {
+  id         String   @id @default(uuid())
+  projectId  String   @map("project_id")
+  entityType String   @map("entity_type") // issue|dependency|project|calendar|milestone|wbs
+  entityId   String   @map("entity_id")
+  issueId    String?  @map("issue_id") // For issue-related activities
+  action     String   // create|update|delete|move|resize|progress|archive|restore
+  actor      String   // User ID performing the action
+  before     Json?    // State before change
+  after      Json?    // State after change
+  metadata   Json?    // Additional context data
+  createdAt  DateTime @default(now()) @map("created_at")
+  
+  project   Project @relation(fields: [projectId], references: [id])
+  issue     Issue?  @relation(fields: [issueId], references: [id])
+  actorUser User    @relation("ActivityActor", fields: [actor], references: [id])
+  
+  @@index([projectId, createdAt(sort: Desc)])
+  @@index([projectId, entityType, entityId])
+  @@index([projectId, actor])
+  @@index([issueId, createdAt(sort: Desc)])
+  @@map("activity_logs")
+}
+
+model ComputedSchedule {
+  id                String   @id @default(uuid())
+  projectId         String   @map("project_id")
+  calculatedAt      DateTime @default(now()) @map("calculated_at")
+  calculatedBy      String   @map("calculated_by") // User ID
+  algorithm         String   // 'cpm' | 'simple'
+  
+  originalEndDate   DateTime @map("original_end_date")
+  computedEndDate   DateTime @map("computed_end_date")
+  totalDuration     Int      @map("total_duration") // days
+  
+  constraints       Json     // ScheduleConstraints
+  taskSchedules     Json     @map("task_schedules") // TaskSchedule[]
+  criticalPath      String[] @map("critical_path") // Task IDs
+  conflicts         Json     // ConflictInfo[]
+  
+  applied           Boolean  @default(false)
+  appliedAt         DateTime? @map("applied_at")
+  rollbackId        String?  @map("rollback_id")
+  
+  project           Project  @relation(fields: [projectId], references: [id])
+  calculator        User     @relation("ScheduleCalculator", fields: [calculatedBy], references: [id])
+  taskHistory       TaskScheduleHistory[]
+  
+  @@map("computed_schedules")
+  @@index([projectId, calculatedAt])
+  @@index([projectId, applied])
+}
+
+model TaskScheduleHistory {
+  id                String   @id @default(uuid())
+  taskId            String   @map("task_id")
+  computedScheduleId String  @map("computed_schedule_id")
+  
+  originalStartDate DateTime @map("original_start_date")
+  originalEndDate   DateTime @map("original_end_date")
+  computedStartDate DateTime @map("computed_start_date")
+  computedEndDate   DateTime @map("computed_end_date")
+  
+  floatTime         Int      @map("float_time") // minutes
+  criticalPath      Boolean  @map("critical_path")
+  conflicts         Json     // ConflictInfo[]
+  
+  task              Issue            @relation(fields: [taskId], references: [id])
+  computedSchedule  ComputedSchedule @relation(fields: [computedScheduleId], references: [id])
+  
+  @@map("task_schedule_history") 
+  @@index([taskId, computedScheduleId])
+  @@index([computedScheduleId, criticalPath])
+}
