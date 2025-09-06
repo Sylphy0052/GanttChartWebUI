@@ -1,54 +1,211 @@
 {
   "phase": "plan",
-  "current_sprint": "Phase 0",
+  "current_sprint": "Sprint 3",
+  "current_task": null,
   "next_tasks": [
     {
+      "id": "S3-BE-01",
+      "title": "Project Password Access Control",
+      "description": "Implement visibility=password and password access tokens for project access",
+      "priority": "high",
+      "estimated_hours": 2,
+      "status": "pending",
+      "sprint": "Sprint 3"
+    },
+    {
+      "id": "S3-BE-02", 
+      "title": "Progress Update API",
+      "description": "Add API endpoints for progress updates with validation and activity logging",
+      "priority": "high",
+      "estimated_hours": 1.5,
+      "status": "pending",
+      "sprint": "Sprint 3"
+    },
+    {
+      "id": "S3-BE-03",
+      "title": "Enhanced Activity Logging",
+      "description": "Expand ActivityLog to capture progress updates and project access events",
+      "priority": "medium",
+      "estimated_hours": 1.5,
+      "status": "pending",
+      "sprint": "Sprint 3"
+    },
+    {
+      "id": "S3-FE-01",
+      "title": "Project Password Modal",
+      "description": "Create password entry modal for protected projects with token storage",
+      "priority": "high",
+      "estimated_hours": 1.5,
+      "status": "pending",
+      "sprint": "Sprint 3"
+    },
+    {
+      "id": "S3-FE-02",
+      "title": "Progress Input Controls",
+      "description": "Add progress handles and percentage input for leaf tasks with parent rollup",
+      "priority": "high",
+      "estimated_hours": 2,
+      "status": "pending",
+      "sprint": "Sprint 3"
+    }
+  ],
+  "completed_tasks": [
+    {
       "id": "task_001",
-      "title": "環境整備・ベース合意",
+      "title": "環境整備・ベース合意", 
       "description": "Docker Compose環境構築、Prisma初期化、基本開発環境のセットアップ",
       "priority": "high",
       "estimated_hours": 4,
-      "status": "pending",
-      "sprint": "Phase 0"
+      "status": "completed",
+      "sprint": "Phase 0",
+      "completed_at": "2025-09-06T00:04:00Z",
+      "deliverables": "Apps Directory Structure Setup"
     },
     {
-      "id": "task_002", 
-      "title": "Prismaモデリング（Project/Issue/Dependency/ActivityLog）",
-      "description": "データモデルをPrismaスキーマで実装し、マイグレーション作成",
+      "id": "task_002",
+      "title": "Project Foundation and Environment Setup",
+      "description": "Complete Docker Compose setup, Prisma integration, and development workflow",
       "priority": "high",
-      "estimated_hours": 6,
-      "status": "pending",
-      "sprint": "Sprint 1"
+      "estimated_hours": 8,
+      "status": "completed", 
+      "sprint": "Phase 0",
+      "completed_at": "2025-09-06T00:08:00Z",
+      "deliverables": "Docker environment, database connection, health checks"
     },
     {
       "id": "task_003",
-      "title": "認証・RBAC簡易実装",
-      "description": "OIDCダミー認証とプロジェクト単位の基本権限制御を実装",
-      "priority": "high", 
-      "estimated_hours": 4,
-      "status": "pending",
-      "sprint": "Sprint 1"
+      "title": "Basic API Foundation",
+      "description": "NestJS setup, basic auth, health endpoints, and API structure",
+      "priority": "high",
+      "estimated_hours": 6,
+      "status": "completed",
+      "sprint": "Phase 0", 
+      "completed_at": "2025-09-06T00:06:00Z",
+      "deliverables": "NestJS API with health endpoints and basic structure"
     },
     {
       "id": "task_004",
-      "title": "Issues API実装（CRUD）",
-      "description": "GET/POST/PATCH/DELETE エンドポイント実装、ETag/If-Match、cursor pagination対応",
+      "title": "Issues CRUD API Implementation",
+      "description": "Complete CRUD operations for Issues with ETag/If-Match concurrency control",
       "priority": "high",
-      "estimated_hours": 8,
-      "status": "pending",
-      "sprint": "Sprint 1"
+      "estimated_hours": 6,
+      "status": "completed",
+      "sprint": "Sprint 1",
+      "completed_at": "2025-09-06T00:07:00Z",
+      "deliverables": "Full CRUD API with optimistic concurrency control"
     },
     {
       "id": "task_005",
-      "title": "フロントエンド基盤構築",
-      "description": "Next.js レイアウト、ルーティング、プロジェクト選択UI、状態管理（Zustand）セットアップ",
+      "title": "Frontend Foundation Implementation",
+      "description": "Next.js setup, authentication, project management, and comprehensive UI foundation",
       "priority": "high",
-      "estimated_hours": 6,
-      "status": "pending", 
-      "sprint": "Sprint 1"
+      "estimated_hours": 10,
+      "status": "completed",
+      "sprint": "Sprint 1",
+      "completed_at": "2025-09-06T03:27:00Z",
+      "deliverables": "Complete frontend foundation with authentication and project management"
+    },
+    {
+      "id": "S2-BE-01",
+      "title": "WBS Hierarchical Data Model",
+      "description": "Add orderIndex field to Issue model for hierarchy with proper indexing",
+      "priority": "high",
+      "estimated_hours": 2,
+      "status": "completed",
+      "sprint": "Sprint 2",
+      "completed_at": "2025-09-06T03:30:00Z"
+    },
+    {
+      "id": "S2-BE-02",
+      "title": "WBS Hierarchy API Endpoints",
+      "description": "GET /projects/:id/wbs, PUT /issues/:id/parent, PUT /issues/:id/reorder endpoints",
+      "priority": "high",
+      "estimated_hours": 2,
+      "status": "completed",
+      "sprint": "Sprint 2",
+      "completed_at": "2025-09-06T03:50:00Z"
+    },
+    {
+      "id": "S2-BE-03",
+      "title": "Dependencies CRUD Operations",
+      "description": "POST/DELETE /issues/:id/dependencies, GET /projects/:id/dependencies with cycle detection",
+      "priority": "high",
+      "estimated_hours": 2,
+      "status": "completed",
+      "sprint": "Sprint 2",
+      "completed_at": "2025-09-06T04:02:00Z"
+    },
+    {
+      "id": "S2-BE-04",
+      "title": "WBS Reordering Logic",
+      "description": "Enhanced bulk operations and tree integrity validation for reordering",
+      "priority": "high",
+      "estimated_hours": 1.5,
+      "status": "completed",
+      "sprint": "Sprint 2",
+      "completed_at": "2025-09-06T04:13:00Z"
+    },
+    {
+      "id": "S2-FE-01",
+      "title": "WBS Tree Component Structure",
+      "description": "Render hierarchical task tree with expand/collapse and proper indentation",
+      "priority": "high",
+      "estimated_hours": 2,
+      "status": "completed",
+      "sprint": "Sprint 2",
+      "completed_at": "2025-09-06T04:33:00Z"
+    },
+    {
+      "id": "S2-FE-02",
+      "title": "Drag & Drop for WBS Reordering",
+      "description": "Drag tasks to reorder within same parent with visual feedback and snap zones",
+      "priority": "high",
+      "estimated_hours": 2,
+      "status": "completed",
+      "sprint": "Sprint 2",
+      "completed_at": "2025-09-06T05:33:00Z"
+    },
+    {
+      "id": "S2-FE-03",
+      "title": "WBS Parent Change Operations",
+      "description": "Drop task on different parent to change hierarchy with validation and API integration",
+      "priority": "high",
+      "estimated_hours": 1.5,
+      "status": "completed",
+      "sprint": "Sprint 2",
+      "completed_at": "2025-09-06T06:30:00Z"
+    },
+    {
+      "id": "S2-FE-04",
+      "title": "Basic Gantt Chart SVG Setup",
+      "description": "SVG container with dimensions, time axis, and task rows aligned with WBS tree",
+      "priority": "high",
+      "estimated_hours": 2,
+      "status": "completed",
+      "sprint": "Sprint 2",
+      "completed_at": "2025-09-06T07:15:00Z"
+    },
+    {
+      "id": "S2-FE-05",
+      "title": "Gantt Task Bars Rendering",
+      "description": "Render task bars with start/end dates, colors for status, proper positioning",
+      "priority": "high",
+      "estimated_hours": 1.5,
+      "status": "completed",
+      "sprint": "Sprint 2",
+      "completed_at": "2025-09-06T08:00:00Z"
+    },
+    {
+      "id": "S2-FE-06",
+      "title": "Gantt Chart Zoom and Pan",
+      "description": "Mouse wheel zoom, pan chart horizontally/vertically, zoom level indicators",
+      "priority": "high",
+      "estimated_hours": 2,
+      "status": "completed",
+      "sprint": "Sprint 2",
+      "completed_at": "2025-09-06T08:45:00Z"
     }
   ],
-  "completed_tasks": [],
   "blocked_tasks": [],
   "kpis": {
     "initial_render_ms_p95": 1500,
@@ -57,42 +214,54 @@
   },
   "current_scope": {
     "include": [
-      "Issue CRUD（タイトル/説明/担当/ステータス/期限）",
-      "Issue一覧（テーブル）＋詳細サイドパネル",
-      "WBS: 親子階層表示、ドラッグ&ドロップで並び替え/階層変更",
-      "ガント: バー表示、バー移動/伸縮（自由移動）、FS依存の追加/削除、Todayライン",
-      "進捗: Leafは％手入力、Parentは子集計",
-      "Undo/Redo: Ctrl/Cmd+Z / Ctrl/Cmd+Y",
-      "カレンダー: 平日稼働・祝日なし、1日=8h固定",
-      "監査ログ: Issue作成/更新/削除、ガント操作のみ記録"
+      "Project password access control (visibility=password)",
+      "Progress update API with validation",
+      "Enhanced activity logging for progress and access events", 
+      "Password entry modal with token storage",
+      "Progress input controls for leaf tasks with parent rollup",
+      "KPI measurement hooks for performance tracking",
+      "Performance optimization for 1,000 Issues target"
     ],
     "exclude": [
-      "通知（Slack/メール/In‑App）、共有リンク、PNG/PDF/Excel/CSV出力",
-      "バックアップ/復元、複数カレンダー/タイムゾーン",
-      "RBACの細分化（Owner/Admin/Viewerの簡易のみ）",
-      "％＋実工数表示切替、Blocked自動反映、クリティカルパス表示",
-      "i18n、リアルタイム共同編集"
+      "Full scheduling engine (Sprint 4)",
+      "Advanced RBAC beyond password access",
+      "Complex calendar management",
+      "Notification systems",
+      "Export functionality",
+      "Real-time collaboration"
     ]
   },
   "acceptance_criteria": [
-    "1,000 Issueのダミーデータで、ガント初回描画 < 1.5s、ドラッグ応答 < 100ms",
-    "WBSとガントの縦スクロールが同期し、階層変更が即時ガントに反映される",
-    "FS依存を追加/削除でき、先行移動で後続の開始日が自動調整される", 
-    "Undo/Redoがバー移動・伸縮・依存作成/削除・Issue編集に対して動作する",
-    "主要操作（drag/resize/dependency/undo）がテレメトリに記録される"
+    "Project password access with 24h token storage",
+    "Progress updates on leaf tasks with automatic parent rollup",
+    "Initial render < 1.5s with 1,000 Issues",
+    "Drag latency < 100ms maintained",
+    "Activity logging for progress and access events",
+    "KPI measurement hooks integrated"
   ],
   "demo_scenarios": [
-    "シナリオA: 5件のIssueでWBS作成→ガントで期間調整→依存設定→Undo/Redo",
-    "シナリオB: 先行タスクを+2日、後続が+2日へ連鎖→Todayラインで進捗を％更新",
-    "シナリオC: 親に子を2件配下へ移動→親の期間/進捗が自動ロールアップ"
+    "Project password entry → successful access with token storage",
+    "Progress update on leaf task → parent progress auto-calculation", 
+    "Performance measurement: 1,000 Issues initial render < 1.5s",
+    "Activity log verification for progress updates and access events"
   ],
   "risks": [
-    "ガント性能が出ない → 仮想スクロール/差分描画",
-    "Undo/Redo複雑化 → コマンドパターン+履歴スタック", 
-    "依存作図UX難 → 端スナップ＋ツールチップ",
-    "スケジューリング遅延 → 影響範囲のみ再計算、WebWorker検討",
-    "仕様ブレ → 週次レビュー、仕様差分は即ドキュメント反映"
+    "Password security implementation complexity",
+    "Performance degradation with progress calculations",
+    "Parent rollup calculation efficiency",
+    "Token storage and session management"
   ],
-  "log": [],
-  "last_updated": "2025-09-06T00:00:00Z"
+  "log": [
+    {
+      "timestamp": "2025-09-06T09:00:00Z",
+      "action": "flow_initialized",
+      "task_id": null,
+      "phase": "plan",
+      "agent": "system",
+      "details": "Flow state initialized for Sprint 3 based on specification and implementation plan. Sprint 2 completed successfully with all WBS and Gantt core functionality implemented.",
+      "deliverables": "✅ Sprint 3 task backlog created with 5 tasks (3 backend, 2 frontend) ✅ Project password access control planned ✅ Progress update system designed ✅ Enhanced activity logging scoped ✅ Performance targets maintained (1.5s render, 100ms drag) ✅ Clear acceptance criteria and demo scenarios defined",
+      "files_changed": [".claude/flow/state.json"]
+    }
+  ],
+  "last_updated": "2025-09-06T09:00:00Z"
 }
