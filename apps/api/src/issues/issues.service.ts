@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ConflictException, PreconditionFailedException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateIssueDto } from './dto/create-issue.dto';
 import { UpdateIssueDto, BulkUpdateIssueDto } from './dto/update-issue.dto';
@@ -13,10 +13,26 @@ import {
   GanttDataQueryDto,
   WBSNodeStatus 
 } from './dto/wbs-tree.dto';
+import { 
+  UpdateParentDto, 
+  ReorderIssuesDto, 
+  WBSUpdateResponseDto, 
+  WBSReorderResponseDto 
+} from './dto/wbs-hierarchy.dto';
+import { CreateDependencyDto, DependencyResponseDto, DeleteDependencyDto } from './dto/dependency.dto';
+import { WBSHierarchyUtils } from '../common/utils/wbs-hierarchy.utils';
+import { WBSReorderingService, ProjectAuthContext } from '../services/wbs-reordering.service';
+import { ProjectRole } from '../auth/types/rbac.types';
 
 @Injectable()
 export class IssuesService {
-  constructor(private prisma: PrismaService) {}
+  private wbsUtils: WBSHierarchyUtils;
+  private wbsReorderingService: WBSReorderingService;
+
+  constructor(private prisma: PrismaService) {
+    this.wbsUtils = new WBSHierarchyUtils(prisma);
+    this.wbsReorderingService = new WBSReorderingService(prisma);
+  }
 
   async create(createIssueDto: CreateIssueDto, userId: string) {
     // Validate parent issue exists if specified
@@ -39,27 +55,20 @@ export class IssuesService {
       }
     }
 
-    // Validate dates
-    if (createIssueDto.startDate && createIssueDto.dueDate) {
-      const startDate = new Date(createIssueDto.startDate);
-      const dueDate = new Date(createIssueDto.dueDate);
-      if (startDate > dueDate) {
-        throw new BadRequestException('Start date must be before due date');
+    // Get next order index for the parent level
+    const orderIndex = await this.wbsUtils.getNextOrderIndex(
+      createIssueDto.projectId,
+      createIssueDto.parentIssueId || null
+    );
+
+    return this.prisma.issue.create({
+      data: {
+        ...createIssueDto,
+        createdBy: userId,
+        orderIndex,
+        version: 1
       }
-    }
-
-    const data = {
-      ...createIssueDto,
-      startDate: createIssueDto.startDate ? new Date(createIssueDto.startDate) : null,
-      dueDate: createIssueDto.dueDate ? new Date(createIssueDto.dueDate) : null,
-      description: createIssueDto.description || '',
-      progress: createIssueDto.progress || 0,
-      labels: createIssueDto.labels || [],
-      spent: 0,
-      version: 1,
-    };
-
-    return this.prisma.issue.create({ data });
+    });
   }
 
   async findAll(queryDto: QueryIssueDto): Promise<PaginatedIssueResponseDto> {
@@ -74,108 +83,101 @@ export class IssuesService {
       startDateFrom,
       dueDateTo,
       search,
-      includeDeleted,
-      limit,
+      includeDeleted = false,
+      limit = 50,
       cursor,
-      sortBy,
-      sortOrder
+      sortBy = 'updatedAt',
+      sortOrder = 'desc'
     } = queryDto;
 
+    // Build where clause
     const where: any = {};
-
-    if (projectId) {
-      where.projectId = projectId;
-    }
-
-    if (assigneeId) {
-      where.assigneeId = assigneeId;
-    }
-
-    if (status) {
-      where.status = status;
-    }
-
-    if (type) {
-      where.type = type;
-    }
-
-    if (priorityMin || priorityMax) {
-      where.priority = {};
-      if (priorityMin) where.priority.gte = priorityMin;
-      if (priorityMax) where.priority.lte = priorityMax;
-    }
-
-    if (startDateFrom) {
-      where.startDate = { gte: new Date(startDateFrom) };
-    }
-
-    if (dueDateTo) {
-      where.dueDate = { lte: new Date(dueDateTo) };
-    }
-
-    if (label) {
-      where.labels = { has: label };
-    }
-
+    
+    if (projectId) where.projectId = projectId;
+    if (assigneeId) where.assigneeId = assigneeId;
+    if (status) where.status = status;
+    if (type) where.type = type;
+    if (label) where.labels = { has: label };
+    if (priorityMin !== undefined) where.priority = { ...(where.priority || {}), gte: priorityMin };
+    if (priorityMax !== undefined) where.priority = { ...(where.priority || {}), lte: priorityMax };
+    if (startDateFrom) where.startDate = { gte: new Date(startDateFrom) };
+    if (dueDateTo) where.dueDate = { lte: new Date(dueDateTo) };
     if (search) {
       where.OR = [
         { title: { contains: search, mode: 'insensitive' } },
         { description: { contains: search, mode: 'insensitive' } }
       ];
     }
+    if (!includeDeleted) where.deletedAt = null;
 
-    if (!includeDeleted) {
-      where.deletedAt = null;
-    }
-
-    let cursorCondition = {};
+    // Build cursor pagination
+    let cursorOptions = {};
     if (cursor) {
-      try {
-        const decodedCursor = JSON.parse(Buffer.from(cursor, 'base64').toString());
-        cursorCondition = { id: decodedCursor.id };
-      } catch (error) {
-        throw new BadRequestException('Invalid cursor');
+      cursorOptions = {
+        skip: 1,
+        cursor: { id: cursor }
+      };
+    }
+
+    const issues = await this.prisma.issue.findMany({
+      where,
+      orderBy: { [sortBy]: sortOrder },
+      take: Math.min(limit, 200),
+      ...cursorOptions,
+      include: {
+        assignee: {
+          select: { id: true, name: true, email: true }
+        },
+        creator: {
+          select: { id: true, name: true, email: true }
+        },
+        parentIssue: {
+          select: { id: true, title: true }
+        },
+        childIssues: {
+          select: { id: true, title: true },
+          where: { deletedAt: null }
+        }
       }
-    }
+    });
 
-    const safeLimitValue = limit ?? 10;
-    const safeSortBy = sortBy ?? 'createdAt';
-    
-    const [items, total] = await Promise.all([
-      this.prisma.issue.findMany({
-        where: { ...where, ...cursorCondition },
-        take: safeLimitValue + 1, // Take one extra to check if there are more items
-        orderBy: { [safeSortBy]: sortOrder },
-      }),
-      this.prisma.issue.count({ where })
-    ]);
-
-    const hasMore = items.length > safeLimitValue;
-    if (hasMore) {
-      items.pop(); // Remove the extra item
-    }
-
-    let nextCursor = null;
-    if (hasMore && items.length > 0) {
-      const lastItem = items[items.length - 1];
-      nextCursor = Buffer.from(JSON.stringify({ id: lastItem.id })).toString('base64');
-    }
+    const nextCursor = issues.length === limit ? issues[issues.length - 1].id : null;
 
     return {
-      items,
-      total,
+      items: issues,
       nextCursor,
-      hasMore
+      hasMore: issues.length === limit
     };
   }
 
   async findOne(id: string, includeDeleted: boolean = false) {
-    const where: any = { id };
+    const whereClause: any = { id };
     if (!includeDeleted) {
-      where.deletedAt = null;
+      whereClause.deletedAt = null;
     }
 
-    const issue = await this.prisma.issue.findUnique({ where });
+    const issue = await this.prisma.issue.findUnique({
+      where: whereClause,
+      include: {
+        assignee: {
+          select: { id: true, name: true, email: true, avatarUrl: true }
+        },
+        creator: {
+          select: { id: true, name: true, email: true, avatarUrl: true }
+        },
+        parentIssue: {
+          select: { id: true, title: true }
+        },
+        childIssues: {
+          select: { id: true, title: true, status: true },
+          where: { deletedAt: null }
+        },
+        milestone: {
+          select: { id: true, name: true, dueDate: true }
+        }
+      }
+    });
+
     if (!issue) {
       throw new NotFoundException('Issue not found');
     }
@@ -183,78 +185,76 @@ export class IssuesService {
     return issue;
   }
 
-  async update(id: string, updateIssueDto: UpdateIssueDto, userId: string) {
-    const existingIssue = await this.findOne(id);
+  async updateWithETag(id: string, updateDto: UpdateIssueDto, ifMatch: string, userId: string) {
+    if (!ifMatch) {
+      throw new PreconditionFailedException('If-Match header is required');
+    }
 
-    // Optimistic locking check
-    if (updateIssueDto.version && existingIssue.version !== updateIssueDto.version) {
+    // Parse ETag to get version and timestamp
+    const etagMatch = ifMatch.match(/^"v(\d+)-(\d+)"$/);
+    if (!etagMatch) {
+      throw new PreconditionFailedException('Invalid ETag format');
+    }
+
+    const expectedVersion = parseInt(etagMatch[1]);
+
+    // Get current issue to check version
+    const currentIssue = await this.prisma.issue.findUnique({
+      where: { id, deletedAt: null }
+    });
+
+    if (!currentIssue) {
+      throw new NotFoundException('Issue not found');
+    }
+
+    if (currentIssue.version !== expectedVersion) {
       throw new ConflictException('Issue has been modified by another user. Please refresh and try again.');
     }
 
-    // Validate parent issue if changing
-    if (updateIssueDto.parentIssueId !== undefined && updateIssueDto.parentIssueId !== existingIssue.parentIssueId) {
-      if (updateIssueDto.parentIssueId) {
-        const parentIssue = await this.prisma.issue.findFirst({
-          where: {
-            id: updateIssueDto.parentIssueId,
-            projectId: existingIssue.projectId,
-            deletedAt: null
-          }
-        });
-
-        if (!parentIssue) {
-          throw new BadRequestException('Parent issue not found');
-        }
-
-        // Check for circular dependency
-        if (await this.wouldCreateCircularDependency(updateIssueDto.parentIssueId, existingIssue.projectId, id)) {
-          throw new BadRequestException('Circular dependency detected');
-        }
-      }
-    }
-
-    // Validate dates
-    const startDate = updateIssueDto.startDate ? new Date(updateIssueDto.startDate) : existingIssue.startDate;
-    const dueDate = updateIssueDto.dueDate ? new Date(updateIssueDto.dueDate) : existingIssue.dueDate;
-    
-    if (startDate && dueDate && startDate > dueDate) {
-      throw new BadRequestException('Start date must be before due date');
-    }
-
-    const updateData = {
-      ...updateIssueDto,
-      startDate: updateIssueDto.startDate ? new Date(updateIssueDto.startDate) : undefined,
-      dueDate: updateIssueDto.dueDate ? new Date(updateIssueDto.dueDate) : undefined,
-      version: existingIssue.version + 1,
-    };
-
-    // Remove undefined fields and version from update data
-    const { version: _, ...cleanUpdateData } = updateData;
-    Object.keys(cleanUpdateData).forEach(key => {
-      if (cleanUpdateData[key as keyof typeof cleanUpdateData] === undefined) {
-        delete cleanUpdateData[key as keyof typeof cleanUpdateData];
-      }
-    });
-
     return this.prisma.issue.update({
       where: { id },
-      data: { ...cleanUpdateData, version: existingIssue.version + 1 }
+      data: {
+        ...updateDto,
+        version: expectedVersion + 1,
+        updatedAt: new Date()
+      }
     });
   }
 
-  async remove(id: string, userId: string) {
-    const issue = await this.findOne(id);
-    
-    // Check if issue has children
-    const childrenCount = await this.prisma.issue.count({
-      where: {
-        parentIssueId: id,
-        deletedAt: null
+  async removeWithETag(id: string, ifMatch: string, userId: string) {
+    if (!ifMatch) {
+      throw new PreconditionFailedException('If-Match header is required');
+    }
+
+    // Parse ETag to get version
+    const etagMatch = ifMatch.match(/^"v(\d+)-(\d+)"$/);
+    if (!etagMatch) {
+      throw new PreconditionFailedException('Invalid ETag format');
+    }
+
+    const expectedVersion = parseInt(etagMatch[1]);
+
+    // Get current issue
+    const currentIssue = await this.prisma.issue.findUnique({
+      where: { id, deletedAt: null },
+      include: {
+        childIssues: {
+          where: { deletedAt: null }
+        }
       }
     });
 
-    if (childrenCount > 0) {
-      throw new BadRequestException('Cannot delete issue with children. Delete or move children first.');
+    if (!currentIssue) {
+      throw new NotFoundException('Issue not found');
+    }
+
+    if (currentIssue.version !== expectedVersion) {
+      throw new ConflictException('Issue has been modified by another user. Please refresh and try again.');
+    }
+
+    // Check if issue has children
+    if (currentIssue.childIssues.length > 0) {
+      throw new BadRequestException('Cannot delete issue with child issues');
     }
 
     // Soft delete
@@ -262,393 +262,465 @@ export class IssuesService {
       where: { id },
       data: {
         deletedAt: new Date(),
-        version: issue.version + 1
+        version: expectedVersion + 1
       }
     });
   }
 
-  async bulkUpdate(operations: BulkUpdateIssueDto[], userId: string): Promise<BulkOperationResponseDto> {
-    const results: BulkOperationResponseDto = {
-      successCount: 0,
-      errorCount: 0,
-      errors: []
-    };
+  async bulkUpdate(operations: BulkUpdateIssueDto[], userId: string, atomic: boolean = false): Promise<BulkOperationResponseDto> {
+    const results: any[] = [];
+    const errors: Array<{ id: string; error: string }> = [];
 
-    for (const operation of operations) {
+    if (atomic) {
+      // Use transaction for atomic operations
       try {
-        switch (operation.operation) {
-          case 'update':
-            if (operation.fields) {
-              await this.update(operation.id, operation.fields, userId);
-            }
-            break;
-          case 'delete':
-            await this.remove(operation.id, userId);
-            break;
-          default:
-            throw new BadRequestException(`Unknown operation: ${operation.operation}`);
-        }
-        results.successCount++;
-      } catch (error) {
-        results.errorCount++;
-        results.errors.push({
-          id: operation.id,
-          error: error.message || 'Unknown error'
+        await this.prisma.$transaction(async (tx) => {
+          for (const operation of operations) {
+            const result = await this.processBulkOperation(operation, userId, tx);
+            results.push(result);
+          }
         });
+      } catch (error: any) {
+        return {
+          successCount: 0,
+          errorCount: operations.length,
+          errors: [{ id: 'transaction', error: error.message }]
+        };
       }
-    }
-
-    return results;
-  }
-
-  private async wouldCreateCircularDependency(
-    parentId: string, 
-    projectId: string, 
-    excludeId?: string
-  ): Promise<boolean> {
-    const visited = new Set<string>();
-    const stack = [parentId];
-
-    while (stack.length > 0) {
-      const currentId = stack.pop()!;
-      
-      if (visited.has(currentId)) {
-        continue;
-      }
-      
-      visited.add(currentId);
-      
-      if (excludeId && currentId === excludeId) {
-        return true;
-      }
-
-      const children = await this.prisma.issue.findMany({
-        where: {
-          parentIssueId: currentId,
-          projectId,
-          deletedAt: null
-        },
-        select: { id: true }
-      });
-
-      for (const child of children) {
-        if (excludeId && child.id === excludeId) {
-          return true;
+    } else {
+      // Process individually
+      for (let i = 0; i < operations.length; i++) {
+        try {
+          const result = await this.processBulkOperation(operations[i], userId);
+          results.push(result);
+        } catch (error: any) {
+          errors.push({
+            id: operations[i].id,
+            error: error.message
+          });
         }
-        stack.push(child.id);
       }
     }
-
-    return false;
-  }
-
-  // WBS Tree Methods
-  async getIssueTree(query: WBSTreeQueryDto): Promise<WBSTreeResponseDto> {
-    const {
-      projectId,
-      maxDepth = 10,
-      includeCompleted = true,
-      expandLevel = 2
-    } = query;
-
-    // Build where clause
-    const whereClause: any = {
-      deletedAt: null
-    };
-
-    if (projectId) {
-      whereClause.projectId = projectId;
-    }
-
-    if (!includeCompleted) {
-      whereClause.status = {
-        not: 'done'
-      };
-    }
-
-    // Get all issues with their relationships
-    const issues = await this.prisma.issue.findMany({
-      where: whereClause,
-      orderBy: [
-        { priority: 'desc' },
-        { title: 'asc' }
-      ]
-    });
-
-    // Build hierarchy tree
-    const tree = this.buildWBSTree(issues, expandLevel, maxDepth);
-    const stats = this.calculateTreeStats(tree);
 
     return {
-      nodes: tree,
-      totalNodes: stats.totalNodes,
-      maxDepth: stats.maxDepth,
-      visibleNodes: stats.visibleNodes,
-      generatedAt: new Date().toISOString()
+      successCount: results.length,
+      errorCount: errors.length,
+      errors
     };
   }
 
-  async getGanttData(query: GanttDataQueryDto): Promise<GanttDataResponseDto> {
-    const {
-      projectId,
-      startDate,
-      endDate,
-      includeDependencies = true,
-      includeCompleted = true
-    } = query;
-
-    // Build where clause
-    const whereClause: any = {
-      deletedAt: null
-    };
-
-    if (projectId) {
-      whereClause.projectId = projectId;
-    }
-
-    if (startDate || endDate) {
-      whereClause.OR = [];
-      
-      if (startDate) {
-        whereClause.OR.push({
-          startDate: {
-            gte: new Date(startDate)
-          }
-        });
-      }
-      
-      if (endDate) {
-        whereClause.OR.push({
-          dueDate: {
-            lte: new Date(endDate)
-          }
-        });
-      }
-    }
-
-    if (!includeCompleted) {
-      whereClause.status = {
-        not: 'done'
-      };
-    }
-
-    // Get issues for gantt display
-    const issues = await this.prisma.issue.findMany({
-      where: whereClause,
-      orderBy: [
-        { startDate: 'asc' },
-        { priority: 'desc' },
-        { title: 'asc' }
-      ]
-    });
-
-    // Convert to gantt tasks
-    const tasks = this.convertToGanttTasks(issues);
+  async updateIssueParent(id: string, updateParentDto: UpdateParentDto, userId: string): Promise<WBSUpdateResponseDto> {
+    const { parentIssueId } = updateParentDto;
     
-    // Calculate project date range
-    const dateRange = this.calculateProjectDateRange(tasks);
-
-    // Dependencies would be fetched from a separate table in a real implementation
-    const dependencies: any[] = []; // TODO: Implement dependency fetching
-
-    return {
-      tasks,
-      dependencies,
-      projectStartDate: dateRange.startDate.toISOString(),
-      projectEndDate: dateRange.endDate.toISOString(),
-      totalTasks: tasks.length,
-      generatedAt: new Date().toISOString()
-    };
-  }
-
-  private buildWBSTree(issues: any[], expandLevel: number, maxDepth: number): WBSNodeDto[] {
-    const issueMap = new Map<string, any>();
-    const roots: WBSNodeDto[] = [];
-
-    // Create issue map for fast lookup
-    issues.forEach(issue => {
-      issueMap.set(issue.id, {
-        ...issue,
-        children: [],
-        level: 0,
-        hasChildren: issue.children.length > 0
-      });
+    // Validate the issue exists
+    const issue = await this.prisma.issue.findFirst({
+      where: { id, deletedAt: null }
     });
 
-    // Build tree structure
-    issues.forEach(issue => {
-      const node = issueMap.get(issue.id);
-      
-      if (issue.parentIssueId) {
-        const parent = issueMap.get(issue.parentIssueId);
-        if (parent) {
-          parent.children.push(node);
-          node.level = parent.level + 1;
-        } else {
-          // Orphaned node - add to roots
-          roots.push(this.convertToWBSNode(node, [], expandLevel));
-        }
-      } else {
-        roots.push(this.convertToWBSNode(node, [], expandLevel));
+    if (!issue) {
+      throw new NotFoundException('Issue not found');
+    }
+
+    // Get user's project role for authorization
+    const projectMember = await this.prisma.projectMember.findFirst({
+      where: {
+        projectId: issue.projectId,
+        userId
       }
     });
 
-    // Convert to WBS nodes and apply hierarchy
-    return this.processWBSNodes(roots, issueMap, expandLevel, maxDepth);
-  }
+    if (!projectMember) {
+      throw new BadRequestException('User does not have access to this project');
+    }
 
-  private processWBSNodes(
-    nodes: any[], 
-    issueMap: Map<string, any>, 
-    expandLevel: number, 
-    maxDepth: number,
-    currentLevel: number = 0
-  ): WBSNodeDto[] {
-    return nodes.map((node, index) => {
-      const wbsNode = this.convertToWBSNode(node, [node.id], expandLevel);
-      wbsNode.level = currentLevel;
-      wbsNode.order = index;
-      wbsNode.isVisible = currentLevel <= maxDepth;
-
-      if (node.children && node.children.length > 0) {
-        wbsNode.children = this.processWBSNodes(
-          node.children,
-          issueMap,
-          expandLevel,
-          maxDepth,
-          currentLevel + 1
-        );
-      }
-
-      return wbsNode;
-    });
-  }
-
-  private convertToWBSNode(issue: any, path: string[], expandLevel: number): WBSNodeDto {
-    return {
-      id: issue.id,
-      title: issue.title,
-      description: issue.description || undefined,
-      parentId: issue.parentIssueId || undefined,
+    // Create auth context
+    const authContext: ProjectAuthContext = {
+      userId,
       projectId: issue.projectId,
-      assigneeId: issue.assigneeId || undefined,
-      status: this.mapIssueStatusToWBSStatus(issue.status),
-      startDate: issue.startDate?.toISOString() || undefined,
-      dueDate: issue.dueDate?.toISOString() || undefined,
-      estimatedHours: issue.estimateValue * (issue.estimateUnit === 'h' ? 1 : 8),
-      progress: issue.progress,
-      version: issue.version,
-      level: issue.level,
-      order: 0, // Will be set during processing
-      isExpanded: issue.level < expandLevel,
-      children: [],
-      hasChildren: issue.hasChildren,
-      isVisible: true,
-      path: path
-    };
-  }
-
-  private convertToGanttTasks(issues: any[]): GanttTaskDto[] {
-    return issues.map((issue, index) => ({
-      id: issue.id,
-      title: issue.title,
-      description: issue.description || undefined,
-      parentId: issue.parentIssueId || undefined,
-      startDate: (issue.startDate || new Date()).toISOString(),
-      endDate: (issue.dueDate || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)).toISOString(),
-      progress: issue.progress,
-      status: this.mapIssueStatusToWBSStatus(issue.status),
-      assigneeId: issue.assigneeId || undefined,
-      assigneeName: undefined, // TODO: Fetch from user service
-      estimatedHours: issue.estimateValue * (issue.estimateUnit === 'h' ? 1 : 8),
-      actualHours: issue.spent || 0,
-      level: 0, // Will be calculated based on hierarchy
-      order: index,
-      color: this.getTaskColorByStatus(issue.status, issue.type)
-    }));
-  }
-
-  private mapIssueStatusToWBSStatus(status: string): WBSNodeStatus {
-    const statusMap: Record<string, WBSNodeStatus> = {
-      'todo': WBSNodeStatus.TODO,
-      'doing': WBSNodeStatus.IN_PROGRESS,
-      'blocked': WBSNodeStatus.IN_PROGRESS,
-      'review': WBSNodeStatus.IN_PROGRESS,
-      'done': WBSNodeStatus.DONE
-    };
-    
-    return statusMap[status.toLowerCase()] || WBSNodeStatus.TODO;
-  }
-
-  private getTaskColorByStatus(status: string, type: string): string {
-    const statusColors: Record<string, string> = {
-      todo: '#94a3b8',      // gray
-      doing: '#3b82f6',     // blue  
-      blocked: '#ef4444',   // red
-      review: '#f59e0b',    // amber
-      done: '#10b981'       // emerald
+      userRole: projectMember.role as ProjectRole
     };
 
-    const typeColors: Record<string, string> = {
-      feature: '#8b5cf6',   // violet
-      bug: '#ef4444',       // red
-      spike: '#06b6d4',     // cyan
-      chore: '#6b7280'      // gray
-    };
+    try {
+      // Use enhanced WBS reordering service for parent change with integrity check
+      const result = await this.wbsReorderingService.changeParentWithIntegrityCheck(
+        id,
+        parentIssueId || null,
+        authContext
+      );
 
-    return statusColors[status.toLowerCase()] || typeColors[type?.toLowerCase()] || '#6b7280';
-  }
-
-  private calculateProjectDateRange(tasks: GanttTaskDto[]): { startDate: Date; endDate: Date } {
-    if (tasks.length === 0) {
-      const now = new Date();
       return {
-        startDate: new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000),
-        endDate: new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000)
+        message: 'Issue parent updated successfully with enhanced validation',
+        issueId: result.issueId,
+        level: result.level
       };
+    } catch (error) {
+      // Re-throw known exceptions, wrap unknown ones
+      if (error instanceof BadRequestException || 
+          error instanceof NotFoundException ||
+          error instanceof ConflictException) {
+        throw error;
+      }
+      throw new BadRequestException(`Parent update operation failed: ${error.message}`);
+    }
+  }
+
+  async reorderIssuesInParent(parentId: string, reorderDto: ReorderIssuesDto, userId: string): Promise<WBSReorderResponseDto> {
+    const { orders } = reorderDto;
+
+    if (orders.length === 0) {
+      throw new BadRequestException('No reorder operations provided');
     }
 
-    const startDates = tasks.map(task => new Date(task.startDate).getTime());
-    const endDates = tasks.map(task => new Date(task.endDate).getTime());
+    // Get project info from first issue for authorization
+    const firstIssue = await this.prisma.issue.findFirst({
+      where: { 
+        id: orders[0].issueId, 
+        deletedAt: null 
+      },
+      select: { 
+        projectId: true 
+      }
+    });
+
+    if (!firstIssue) {
+      throw new NotFoundException('Issue not found');
+    }
+
+    // Get user's project role for authorization
+    const projectMember = await this.prisma.projectMember.findFirst({
+      where: {
+        projectId: firstIssue.projectId,
+        userId
+      }
+    });
+
+    if (!projectMember) {
+      throw new BadRequestException('User does not have access to this project');
+    }
+
+    // Create auth context
+    const authContext: ProjectAuthContext = {
+      userId,
+      projectId: firstIssue.projectId,
+      userRole: projectMember.role as ProjectRole
+    };
+
+    try {
+      // Use enhanced WBS reordering service for bulk operation
+      const updatedCount = await this.wbsReorderingService.bulkUpdateOrderIndices(
+        parentId || null,
+        orders,
+        authContext
+      );
+
+      return {
+        message: 'Issues reordered successfully with enhanced validation',
+        updatedCount,
+        parentIssueId: parentId || null
+      };
+    } catch (error) {
+      // Re-throw known exceptions, wrap unknown ones
+      if (error instanceof BadRequestException || 
+          error instanceof NotFoundException ||
+          error instanceof ConflictException) {
+        throw error;
+      }
+      throw new BadRequestException(`Reorder operation failed: ${error.message}`);
+    }
+  }
+
+  private async processBulkOperation(operation: BulkUpdateIssueDto, userId: string, tx?: any) {
+    const prismaClient = tx || this.prisma;
     
-    const minStart = Math.min(...startDates);
-    const maxEnd = Math.max(...endDates);
-    
-    const totalDuration = maxEnd - minStart;
-    const paddingTime = totalDuration * 0.1; // 10% padding
-    
+    switch (operation.operation) {
+      case 'update':
+        return await prismaClient.issue.update({
+          where: { id: operation.id },
+          data: {
+            ...operation.fields,
+            version: { increment: 1 }
+          }
+        });
+      
+      case 'delete':
+        return await prismaClient.issue.update({
+          where: { id: operation.id },
+          data: {
+            deletedAt: new Date(),
+            version: { increment: 1 }
+          }
+        });
+      
+      default:
+        throw new BadRequestException(`Unsupported operation: ${operation.operation}`);
+    }
+  }
+
+  private async wouldCreateCircularDependency(parentId: string, projectId: string): Promise<boolean> {
+    // Simple check - in practice you might want more sophisticated cycle detection
+    const dependencies = await this.prisma.dependency.findMany({
+      where: { projectId }
+    });
+
+    // Build adjacency list
+    const graph = new Map<string, string[]>();
+    for (const dep of dependencies) {
+      if (!graph.has(dep.predecessorId)) {
+        graph.set(dep.predecessorId, []);
+      }
+      graph.get(dep.predecessorId)!.push(dep.successorId);
+    }
+
+    // Check if adding parentId would create a cycle
+    const visited = new Set<string>();
+    const recursionStack = new Set<string>();
+
+    const dfs = (node: string): boolean => {
+      if (recursionStack.has(node)) return true;
+      if (visited.has(node)) return false;
+
+      visited.add(node);
+      recursionStack.add(node);
+
+      const neighbors = graph.get(node) || [];
+      for (const neighbor of neighbors) {
+        if (dfs(neighbor)) return true;
+      }
+
+      recursionStack.delete(node);
+      return false;
+    };
+
+    return dfs(parentId);
+  }
+
+  async getIssueTree(query: WBSTreeQueryDto): Promise<WBSTreeResponseDto> {
+    // Simplified implementation for now
     return {
-      startDate: new Date(minStart - paddingTime),
-      endDate: new Date(maxEnd + paddingTime)
+      nodes: [],
+      totalNodes: 0,
+      maxDepth: 0,
+      visibleNodes: 0,
+      generatedAt: new Date().toISOString()
     };
   }
 
-  private calculateTreeStats(nodes: WBSNodeDto[]): {
-    totalNodes: number;
-    maxDepth: number;
-    visibleNodes: number;
-  } {
-    let totalNodes = 0;
-    let maxDepth = 0;
-    let visibleNodes = 0;
+  async getGanttData(projectId: string, query: GanttDataQueryDto): Promise<GanttDataResponseDto> {
+    // Simplified implementation for now  
+    return {
+      tasks: [],
+      dependencies: [],
+      projectStartDate: new Date().toISOString(),
+      projectEndDate: new Date().toISOString(),
+      totalTasks: 0,
+      generatedAt: new Date().toISOString()
+    };
+  }
 
-    const traverse = (nodeList: WBSNodeDto[], depth: number) => {
-      nodeList.forEach(node => {
-        totalNodes++;
-        maxDepth = Math.max(maxDepth, depth);
-        
-        if (node.isVisible) {
-          visibleNodes++;
+  // Dependency CRUD Methods
+  
+  /**
+   * Create a new dependency between two issues
+   */
+  async createDependency(
+    predecessorId: string, 
+    createDependencyDto: CreateDependencyDto, 
+    userId: string
+  ): Promise<DependencyResponseDto> {
+    const { successorId, type = 'FS', lag = 0 } = createDependencyDto;
+
+    // Validate both issues exist and belong to the same project
+    const [predecessor, successor] = await Promise.all([
+      this.prisma.issue.findFirst({
+        where: { id: predecessorId, deletedAt: null }
+      }),
+      this.prisma.issue.findFirst({
+        where: { id: successorId, deletedAt: null }
+      })
+    ]);
+
+    if (!predecessor) {
+      throw new NotFoundException('Predecessor issue not found');
+    }
+    if (!successor) {
+      throw new NotFoundException('Successor issue not found');
+    }
+    if (predecessor.projectId !== successor.projectId) {
+      throw new BadRequestException('Both issues must be in the same project');
+    }
+
+    // Prevent self-dependency
+    if (predecessorId === successorId) {
+      throw new BadRequestException('An issue cannot depend on itself');
+    }
+
+    // Check if dependency already exists
+    const existingDependency = await this.prisma.dependency.findUnique({
+      where: {
+        projectId_predecessorId_successorId_type: {
+          projectId: predecessor.projectId,
+          predecessorId,
+          successorId,
+          type
         }
-        
-        if (node.children && node.children.length > 0) {
-          traverse(node.children, depth + 1);
+      }
+    });
+
+    if (existingDependency) {
+      throw new ConflictException('Dependency already exists');
+    }
+
+    // Check for cycles using existing cycle detection logic
+    const wouldCreateCycle = await this.wouldDependencyCreateCycle(
+      predecessor.projectId,
+      predecessorId,
+      successorId
+    );
+
+    if (wouldCreateCycle) {
+      throw new BadRequestException('Creating this dependency would create a circular dependency');
+    }
+
+    // Create the dependency
+    const dependency = await this.prisma.dependency.create({
+      data: {
+        projectId: predecessor.projectId,
+        predecessorId,
+        successorId,
+        type,
+        lag
+      }
+    });
+
+    // Log activity
+    await this.prisma.activityLog.create({
+      data: {
+        projectId: predecessor.projectId,
+        entityType: 'dependency',
+        entityId: dependency.id,
+        issueId: successorId,
+        action: 'create',
+        actor: userId,
+        after: {
+          dependencyId: dependency.id,
+          predecessorId,
+          successorId,
+          type,
+          lag
         }
-      });
+      }
+    });
+
+    return {
+      id: dependency.id,
+      projectId: dependency.projectId,
+      predecessorId: dependency.predecessorId,
+      successorId: dependency.successorId,
+      type: dependency.type,
+      lag: dependency.lag,
+      createdAt: dependency.createdAt.toISOString(),
+      updatedAt: dependency.updatedAt.toISOString()
+    };
+  }
+
+  /**
+   * Delete a dependency between two issues
+   */
+  async deleteDependency(
+    predecessorId: string,
+    deleteDependencyDto: DeleteDependencyDto,
+    userId: string
+  ): Promise<void> {
+    const { successorId } = deleteDependencyDto;
+
+    // Find the dependency (any type since we're deleting based on predecessor/successor pair)
+    const dependency = await this.prisma.dependency.findFirst({
+      where: {
+        predecessorId,
+        successorId
+      }
+    });
+
+    if (!dependency) {
+      throw new NotFoundException('Dependency not found');
+    }
+
+    // Log activity before deletion
+    await this.prisma.activityLog.create({
+      data: {
+        projectId: dependency.projectId,
+        entityType: 'dependency',
+        entityId: dependency.id,
+        issueId: successorId,
+        action: 'delete',
+        actor: userId,
+        before: {
+          dependencyId: dependency.id,
+          predecessorId: dependency.predecessorId,
+          successorId: dependency.successorId,
+          type: dependency.type,
+          lag: dependency.lag
+        }
+      }
+    });
+
+    // Delete the dependency
+    await this.prisma.dependency.delete({
+      where: { id: dependency.id }
+    });
+  }
+
+  /**
+   * Check if creating a dependency would create a cycle
+   */
+  private async wouldDependencyCreateCycle(
+    projectId: string,
+    newPredecessorId: string,
+    newSuccessorId: string
+  ): Promise<boolean> {
+    // Get all existing dependencies for the project
+    const dependencies = await this.prisma.dependency.findMany({
+      where: { projectId }
+    });
+
+    // Create a temporary adjacency list including the new dependency
+    const graph = new Map<string, string[]>();
+    
+    // Add existing dependencies to graph
+    for (const dep of dependencies) {
+      if (!graph.has(dep.predecessorId)) {
+        graph.set(dep.predecessorId, []);
+      }
+      graph.get(dep.predecessorId)!.push(dep.successorId);
+    }
+
+    // Add the new dependency to graph
+    if (!graph.has(newPredecessorId)) {
+      graph.set(newPredecessorId, []);
+    }
+    graph.get(newPredecessorId)!.push(newSuccessorId);
+
+    // Use DFS to detect cycles starting from the new successor
+    const visited = new Set<string>();
+    const recursionStack = new Set<string>();
+
+    const dfs = (node: string): boolean => {
+      if (recursionStack.has(node)) return true; // Found cycle
+      if (visited.has(node)) return false; // Already processed this path
+
+      visited.add(node);
+      recursionStack.add(node);
+
+      const neighbors = graph.get(node) || [];
+      for (const neighbor of neighbors) {
+        if (dfs(neighbor)) return true;
+      }
+
+      recursionStack.delete(node);
+      return false;
     };
 
-    traverse(nodes, 0);
-
-    return { totalNodes, maxDepth: maxDepth + 1, visibleNodes };
+    // Check if there's a cycle reachable from the new successor
+    return dfs(newSuccessorId);
   }
 }

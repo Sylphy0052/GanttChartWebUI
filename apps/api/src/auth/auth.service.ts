@@ -3,11 +3,11 @@ import { JwtService } from '@nestjs/jwt';
 import { LoginDto } from './dto/login.dto';
 import { JwtPayload } from './jwt.strategy';
 
-// 簡易実装: 実際のプロダクションではデータベースから取得
+// Enhanced demo users with RBAC context
 const DEMO_USERS = [
-  { id: '1', email: 'admin@example.com', name: 'Admin User', password: 'admin123' },
-  { id: '2', email: 'user@example.com', name: 'Test User', password: 'user123' },
-  { id: '3', email: 'demo@example.com', name: 'Demo User', password: 'demo123' }
+  { id: 'user-1', email: 'admin@example.com', name: 'Admin User', password: 'admin123', role: 'admin' },
+  { id: 'user-2', email: 'user@example.com', name: 'Test User', password: 'user123', role: 'member' },
+  { id: 'user-3', email: 'demo@example.com', name: 'Demo User', password: 'demo123', role: 'viewer' }
 ];
 
 @Injectable()
@@ -43,6 +43,7 @@ export class AuthService {
         id: user.id,
         email: user.email,
         name: user.name,
+        role: user.role, // Include role for RBAC
       },
     };
   }
@@ -55,5 +56,32 @@ export class AuthService {
 
     const { password: _, ...result } = user;
     return result;
+  }
+
+  // Basic RBAC helper methods (simplified for PoC)
+  async getUserProjectRole(userId: string, projectId: string): Promise<string | null> {
+    const user = DEMO_USERS.find(u => u.id === userId);
+    // For PoC, return user's default role
+    return user?.role || 'viewer';
+  }
+
+  async checkProjectPermission(userId: string, projectId: string, permission: string): Promise<boolean> {
+    const role = await this.getUserProjectRole(userId, projectId);
+    
+    if (!role) {
+      return false;
+    }
+
+    // Simple role-based permissions for PoC
+    switch (role) {
+      case 'admin':
+        return true; // Admins can do everything
+      case 'member':
+        return permission !== 'deleteProject'; // Members can't delete projects
+      case 'viewer':
+        return permission === 'viewProject'; // Viewers can only view
+      default:
+        return false;
+    }
   }
 }

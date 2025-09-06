@@ -10,18 +10,24 @@ import {
   UseGuards,
   HttpStatus,
   HttpCode,
-  Request
+  Request,
+  Query,
+  ParseUUIDPipe,
+  ValidationPipe
 } from '@nestjs/common';
 import {
   ApiTags,
   ApiOperation,
   ApiResponse,
-  ApiBearerAuth
+  ApiBearerAuth,
+  ApiQuery
 } from '@nestjs/swagger';
 import { ProjectsService } from './projects.service';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
 import { ProjectPasswordDto, ProjectAccessDto, ProjectAccessResponseDto } from './dto/project-access.dto';
+import { WBSTreeResponseDto, WBSTreeQueryDto } from '../issues/dto/wbs-tree.dto';
+import { DependencyResponseDto } from '../issues/dto/dependency.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt.guard';
 
 @ApiTags('Projects')
@@ -67,6 +73,51 @@ export class ProjectsController {
   })
   async findOne(@Param('id') id: string) {
     return this.projectsService.findOne(id);
+  }
+
+  @Get(':id/wbs')
+  @ApiOperation({ summary: 'Get WBS hierarchy tree for a project' })
+  @ApiResponse({
+    status: 200,
+    description: 'Project WBS hierarchy retrieved successfully',
+    type: WBSTreeResponseDto
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Project not found'
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Bad request - invalid query parameters'
+  })
+  @ApiQuery({ name: 'maxDepth', required: false, type: Number, description: 'Maximum depth to expand (default: 5)' })
+  @ApiQuery({ name: 'includeCompleted', required: false, type: Boolean, description: 'Include completed tasks (default: true)' })
+  @ApiQuery({ name: 'expandLevel', required: false, type: Number, description: 'Default expand level (default: 2)' })
+  async getProjectWBS(
+    @Param('id', ParseUUIDPipe) projectId: string,
+    @Query(ValidationPipe) query: Omit<WBSTreeQueryDto, 'projectId'>
+  ): Promise<WBSTreeResponseDto> {
+    return this.projectsService.getProjectWBS(projectId, query);
+  }
+
+  @Get(':id/dependencies')
+  @ApiOperation({ 
+    summary: 'Get all dependencies in a project',
+    description: 'Retrieve all task dependency relationships within a project, including both predecessor and successor information.'
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Project dependencies retrieved successfully',
+    type: [DependencyResponseDto]
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Project not found'
+  })
+  async getProjectDependencies(
+    @Param('id', ParseUUIDPipe) projectId: string
+  ): Promise<DependencyResponseDto[]> {
+    return this.projectsService.getProjectDependencies(projectId);
   }
 
   @Patch(':id')

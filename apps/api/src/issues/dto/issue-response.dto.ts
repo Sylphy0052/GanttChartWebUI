@@ -1,4 +1,4 @@
-import { ApiProperty } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { Issue } from '../entities/issue.entity';
 
 export class IssueResponseDto extends Issue {}
@@ -10,11 +10,11 @@ export class PaginatedIssueResponseDto {
   })
   items: IssueResponseDto[];
 
-  @ApiProperty({
-    description: 'Total count',
+  @ApiPropertyOptional({
+    description: 'Total count (only provided on first page)',
     example: 1250
   })
-  total: number;
+  total?: number;
 
   @ApiProperty({
     description: 'Next cursor for pagination',

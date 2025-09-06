@@ -1,8 +1,11 @@
 import { Injectable } from '@nestjs/common';
+import { PrismaService } from './prisma/prisma.service';
 
 @Injectable()
 export class AppService {
   private startTime = Date.now();
+
+  constructor(private prisma: PrismaService) {}
 
   getHealth() {
     return {
@@ -12,12 +15,26 @@ export class AppService {
     };
   }
 
-  getDetailedHealth() {
+  async getDetailedHealth() {
+    let databaseStatus = 'disconnected';
+    let databaseError = null;
+
+    try {
+      // Test database connection
+      await this.prisma.$queryRaw`SELECT 1`;
+      databaseStatus = 'connected';
+    } catch (error) {
+      databaseStatus = 'error';
+      databaseError = error.message;
+    }
+
     return {
-      status: 'healthy',
+      status: databaseStatus === 'connected' ? 'healthy' : 'unhealthy',
       timestamp: new Date().toISOString(),
       uptime: Date.now() - this.startTime,
-      database: 'connected' // TODO: Add actual database health check
+      database: databaseStatus,
+      ...(databaseError && { databaseError }),
+      environment: process.env.NODE_ENV || 'unknown'
     };
   }
 }

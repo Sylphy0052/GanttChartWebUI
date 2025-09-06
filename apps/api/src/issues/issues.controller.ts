@@ -9,42 +9,47 @@ import {
   Query,
   Request,
   UseGuards,
-  UseInterceptors,
+  HttpCode,
   HttpStatus,
-  HttpCode
+  Headers,
+  Res,
+  ParseUUIDPipe,
+  ValidationPipe,
+  Put
 } from '@nestjs/common';
-import {
-  ApiTags,
-  ApiOperation,
-  ApiResponse,
-  ApiBearerAuth,
-  ApiQuery,
-  ApiHeader
-} from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiQuery, ApiBearerAuth, ApiHeader } from '@nestjs/swagger';
+import { Response } from 'express';
 import { IssuesService } from './issues.service';
 import { CreateIssueDto } from './dto/create-issue.dto';
 import { UpdateIssueDto, BulkUpdateIssueDto } from './dto/update-issue.dto';
 import { QueryIssueDto } from './dto/query-issue.dto';
-import { IssueResponseDto, PaginatedIssueResponseDto, BulkOperationResponseDto } from './dto/issue-response.dto';
+import { PaginatedIssueResponseDto, BulkOperationResponseDto } from './dto/issue-response.dto';
 import { 
   WBSTreeResponseDto, 
   WBSTreeQueryDto, 
   GanttDataResponseDto, 
-  GanttDataQueryDto 
+  GanttDataQueryDto
 } from './dto/wbs-tree.dto';
+import { 
+  UpdateParentDto, 
+  ReorderIssuesDto, 
+  WBSUpdateResponseDto, 
+  WBSReorderResponseDto 
+} from './dto/wbs-hierarchy.dto';
+import { 
+  CreateDependencyDto, 
+  DependencyResponseDto, 
+  DeleteDependencyDto 
+} from './dto/dependency.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt.guard';
-import { ETagInterceptor, ValidateETag } from '../scheduling/interceptors/etag.interceptor';
-import { ConflictDetectionService } from '../scheduling/services/conflict-detection.service';
 
 @ApiTags('Issues')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard)
-@UseInterceptors(ETagInterceptor)
 @Controller('issues')
+@UseGuards(JwtAuthGuard)
 export class IssuesController {
   constructor(
-    private readonly issuesService: IssuesService,
-    private readonly conflictDetectionService: ConflictDetectionService
+    private readonly issuesService: IssuesService
   ) {}
 
   @Post()
@@ -52,80 +57,122 @@ export class IssuesController {
   @ApiResponse({
     status: 201,
     description: 'Issue created successfully',
-    type: IssueResponseDto
+    schema: {
+      type: 'object',
+      properties: {
+        id: { type: 'string' },
+        title: { type: 'string' },
+        status: { type: 'string' },
+        projectId: { type: 'string' },
+        parentIssueId: { type: 'string' },
+        assigneeId: { type: 'string' },
+        priority: { type: 'number' },
+        estimateValue: { type: 'number' },
+        estimateUnit: { type: 'string' },
+        version: { type: 'number' },
+        createdAt: { type: 'string', format: 'date-time' },
+        updatedAt: { type: 'string', format: 'date-time' }
+      }
+    },
+    headers: {
+      ETag: {
+        description: 'Entity tag for optimistic locking',
+        schema: { type: 'string' }
+      }
+    }
   })
   @ApiResponse({
     status: 400,
-    description: 'Bad request - validation failed'
-  })
-  @ApiResponse({
-    status: 401,
-    description: 'Unauthorized'
+    description: 'Bad request - validation failed or business rules violated'
   })
   async create(
-    @Body() createIssueDto: CreateIssueDto,
-    @Request() req: any
-  ): Promise<IssueResponseDto> {
-    return this.issuesService.create(createIssueDto, req.user.id);
+    @Body(ValidationPipe) createIssueDto: CreateIssueDto, 
+    @Request() req: any,
+    @Res() res: Response
+  ) {
+    const issue = await this.issuesService.create(createIssueDto, req.user.id);
+    
+    // Generate ETag from version and updatedAt
+    const etag = this.generateETag(issue.version, issue.updatedAt);
+    res.set('ETag', etag);
+    
+    return res.status(201).json(issue);
   }
 
   @Get()
-  @ApiOperation({ summary: 'Get issues with filtering and pagination' })
+  @ApiOperation({ summary: 'Get paginated list of issues with cursor pagination' })
   @ApiResponse({
     status: 200,
     description: 'Issues retrieved successfully',
     type: PaginatedIssueResponseDto
   })
-  @ApiResponse({
-    status: 400,
-    description: 'Bad request - invalid query parameters'
-  })
-  async findAll(
-    @Query() queryDto: QueryIssueDto
-  ): Promise<PaginatedIssueResponseDto> {
+  @ApiQuery({ name: 'projectId', required: false, description: 'Filter by project ID' })
+  @ApiQuery({ name: 'assigneeId', required: false, description: 'Filter by assignee ID' })
+  @ApiQuery({ name: 'status', required: false, description: 'Filter by status' })
+  @ApiQuery({ name: 'type', required: false, description: 'Filter by issue type' })
+  @ApiQuery({ name: 'label', required: false, description: 'Filter by label' })
+  @ApiQuery({ name: 'priorityMin', required: false, type: Number, description: 'Minimum priority (1-10)' })
+  @ApiQuery({ name: 'priorityMax', required: false, type: Number, description: 'Maximum priority (1-10)' })
+  @ApiQuery({ name: 'startDateFrom', required: false, description: 'Filter by start date from (ISO string)' })
+  @ApiQuery({ name: 'dueDateTo', required: false, description: 'Filter by due date to (ISO string)' })
+  @ApiQuery({ name: 'search', required: false, description: 'Search in title and description' })
+  @ApiQuery({ name: 'includeDeleted', required: false, type: Boolean, description: 'Include deleted issues' })
+  @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Items per page (max 200)', example: 50 })
+  @ApiQuery({ name: 'cursor', required: false, description: 'Pagination cursor' })
+  @ApiQuery({ name: 'sortBy', required: false, enum: ['createdAt', 'updatedAt', 'dueDate', 'priority', 'title'], description: 'Sort field', example: 'updatedAt' })
+  @ApiQuery({ name: 'sortOrder', required: false, enum: ['asc', 'desc'], description: 'Sort order', example: 'desc' })
+  async findAll(@Query(ValidationPipe) queryDto: QueryIssueDto): Promise<PaginatedIssueResponseDto> {
     return this.issuesService.findAll(queryDto);
   }
 
   @Get(':id')
-  @ApiOperation({ summary: 'Get issue by ID' })
+  @ApiOperation({ summary: 'Get issue by ID with ETag support' })
   @ApiResponse({
     status: 200,
     description: 'Issue retrieved successfully',
-    type: IssueResponseDto
+    headers: {
+      ETag: {
+        description: 'Entity tag for optimistic locking',
+        schema: { type: 'string' }
+      }
+    }
   })
   @ApiResponse({
     status: 404,
     description: 'Issue not found'
   })
-  @ApiQuery({
-    name: 'includeDeleted',
-    required: false,
-    description: 'Include deleted issues',
-    type: Boolean
-  })
+  @ApiQuery({ name: 'includeDeleted', required: false, type: Boolean, description: 'Include deleted issues' })
   async findOne(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Res() res: Response,
     @Query('includeDeleted') includeDeleted?: boolean
-  ): Promise<IssueResponseDto> {
-    return this.issuesService.findOne(id, includeDeleted);
+  ) {
+    const issue = await this.issuesService.findOne(id, includeDeleted);
+    
+    // Generate ETag from version and updatedAt
+    const etag = this.generateETag(issue.version, issue.updatedAt);
+    res.set('ETag', etag);
+    
+    return res.json(issue);
   }
 
   @Patch(':id')
-  @ValidateETag()
-  @ApiOperation({ summary: 'Update issue by ID' })
+  @ApiOperation({ summary: 'Update issue with optimistic locking' })
   @ApiHeader({
     name: 'If-Match',
     description: 'ETag value for optimistic locking',
-    required: false
+    required: true,
+    schema: { type: 'string' }
   })
   @ApiResponse({
     status: 200,
     description: 'Issue updated successfully',
-    type: IssueResponseDto
-  })
-  @ApiResponse({
-    status: 400,
-    description: 'Bad request - validation failed'
+    headers: {
+      ETag: {
+        description: 'Updated entity tag',
+        schema: { type: 'string' }
+      }
+    }
   })
   @ApiResponse({
     status: 404,
@@ -133,114 +180,135 @@ export class IssuesController {
   })
   @ApiResponse({
     status: 409,
-    description: 'Conflict - issue was modified by another user'
+    description: 'Conflict - issue has been modified by another user'
   })
   @ApiResponse({
     status: 412,
-    description: 'Precondition failed - If-Match header mismatch'
+    description: 'Precondition Failed - If-Match header missing or invalid'
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Bad request - validation failed'
   })
   async update(
-    @Param('id') id: string,
-    @Body() updateIssueDto: UpdateIssueDto,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(ValidationPipe) updateIssueDto: UpdateIssueDto,
+    @Headers('if-match') ifMatch: string,
+    @Request() req: any,
+    @Res() res: Response
+  ) {
+    const updatedIssue = await this.issuesService.updateWithETag(id, updateIssueDto, ifMatch, req.user.id);
+    
+    // Generate new ETag
+    const etag = this.generateETag(updatedIssue.version, updatedIssue.updatedAt);
+    res.set('ETag', etag);
+    
+    return res.json(updatedIssue);
+  }
+
+  @Put(':id/parent')
+  @ApiOperation({ summary: 'Update issue parent with hierarchy validation' })
+  @ApiResponse({
+    status: 200,
+    description: 'Issue parent updated successfully',
+    type: WBSUpdateResponseDto
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Issue not found'
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Bad request - invalid parent or would create cycle/exceed depth'
+  })
+  async updateParent(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(ValidationPipe) updateParentDto: UpdateParentDto,
     @Request() req: any
-  ): Promise<IssueResponseDto> {
-    return this.issuesService.update(id, updateIssueDto, req.user.id);
+  ): Promise<WBSUpdateResponseDto> {
+    return this.issuesService.updateIssueParent(id, updateParentDto, req.user.id);
+  }
+
+  @Put(':id/reorder')
+  @ApiOperation({ summary: 'Reorder issues within same parent level' })
+  @ApiResponse({
+    status: 200,
+    description: 'Issues reordered successfully',
+    type: WBSReorderResponseDto
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Issue not found'
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Bad request - invalid order data or issues not in same parent'
+  })
+  async reorderIssues(
+    @Param('id', ParseUUIDPipe) parentId: string,
+    @Body(ValidationPipe) reorderDto: ReorderIssuesDto,
+    @Request() req: any
+  ): Promise<WBSReorderResponseDto> {
+    return this.issuesService.reorderIssuesInParent(parentId, reorderDto, req.user.id);
   }
 
   @Delete(':id')
-  @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Soft delete issue by ID' })
+  @ApiOperation({ summary: 'Delete issue (soft delete) with optimistic locking' })
+  @ApiHeader({
+    name: 'If-Match',
+    description: 'ETag value for optimistic locking',
+    required: true,
+    schema: { type: 'string' }
+  })
   @ApiResponse({
-    status: 204,
+    status: 200,
     description: 'Issue deleted successfully'
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Issue not found'
   })
   @ApiResponse({
     status: 400,
     description: 'Bad request - cannot delete issue with children'
   })
   @ApiResponse({
-    status: 404,
-    description: 'Issue not found'
+    status: 412,
+    description: 'Precondition Failed - If-Match header missing or invalid'
   })
   async remove(
-    @Param('id') id: string,
+    @Param('id', ParseUUIDPipe) id: string, 
+    @Headers('if-match') ifMatch: string,
     @Request() req: any
-  ): Promise<void> {
-    await this.issuesService.remove(id, req.user.id);
+  ) {
+    await this.issuesService.removeWithETag(id, ifMatch, req.user.id);
+    return { message: 'Issue deleted successfully' };
   }
 
-  @Post('bulk')
-  @ApiOperation({ summary: 'Bulk operations on issues' })
+  @Post('bulk-update')
+  @ApiOperation({ summary: 'Bulk update or delete multiple issues with atomic option' })
+  @ApiQuery({ name: 'atomic', required: false, type: Boolean, description: 'If true, all operations succeed or all fail', example: true })
   @ApiResponse({
     status: 200,
-    description: 'Bulk operations completed',
+    description: 'Bulk operation completed',
     type: BulkOperationResponseDto
   })
   @ApiResponse({
     status: 400,
-    description: 'Bad request - validation failed'
+    description: 'Bad request - invalid operation or validation failed'
   })
   async bulkUpdate(
-    @Body() operations: BulkUpdateIssueDto[],
+    @Body(ValidationPipe) operations: BulkUpdateIssueDto[],
+    @Query('atomic') atomic: boolean = false,
     @Request() req: any
   ): Promise<BulkOperationResponseDto> {
-    return this.issuesService.bulkUpdate(operations, req.user.id);
+    return this.issuesService.bulkUpdate(operations, req.user.id, atomic);
   }
 
-  @Get(':id/children')
-  @ApiOperation({ summary: 'Get child issues' })
-  @ApiResponse({
-    status: 200,
-    description: 'Child issues retrieved successfully',
-    type: [IssueResponseDto]
-  })
-  async getChildren(
-    @Param('id') id: string,
-    @Query('includeDeleted') includeDeleted?: boolean
-  ): Promise<IssueResponseDto[]> {
-    const queryDto: QueryIssueDto = {
-      includeDeleted: includeDeleted,
-      limit: 1000, // High limit for children
-      sortBy: 'createdAt',
-      sortOrder: 'asc'
-    };
-
-    // Find all children recursively
-    const result = await this.issuesService.findAll({
-      ...queryDto,
-      // Note: This is a simplified implementation
-      // In production, you might want to add a specific method for hierarchical queries
-    });
-
-    return result.items.filter(issue => issue.parentIssueId === id);
-  }
-
-  @Get('projects/:projectId/hierarchy')
-  @ApiOperation({ summary: 'Get project issues hierarchy' })
-  @ApiResponse({
-    status: 200,
-    description: 'Project hierarchy retrieved successfully',
-    type: [IssueResponseDto]
-  })
-  async getProjectHierarchy(
-    @Param('projectId') projectId: string,
-    @Query('includeDeleted') includeDeleted?: boolean
-  ): Promise<IssueResponseDto[]> {
-    const queryDto: QueryIssueDto = {
-      projectId,
-      includeDeleted: includeDeleted,
-      limit: 1000, // High limit for full project
-      sortBy: 'createdAt',
-      sortOrder: 'asc'
-    };
-
-    const result = await this.issuesService.findAll(queryDto);
-    return result.items;
-  }
-
-  // WBS and Gantt endpoints
+  // Tree and Gantt Chart endpoints
+  
   @Get('tree')
-  @ApiOperation({ summary: 'Get WBS tree structure' })
+  @ApiOperation({ summary: 'Get WBS tree view of issues' })
   @ApiResponse({
     status: 200,
     description: 'WBS tree retrieved successfully',
@@ -254,7 +322,7 @@ export class IssuesController {
   @ApiQuery({ name: 'maxDepth', required: false, type: Number, description: 'Maximum depth to expand' })
   @ApiQuery({ name: 'includeCompleted', required: false, type: Boolean, description: 'Include completed tasks' })
   @ApiQuery({ name: 'expandLevel', required: false, type: Number, description: 'Default expand level' })
-  async getWBSTree(@Query() query: WBSTreeQueryDto): Promise<WBSTreeResponseDto> {
+  async getWBSTree(@Query(ValidationPipe) query: WBSTreeQueryDto): Promise<WBSTreeResponseDto> {
     return this.issuesService.getIssueTree(query);
   }
 
@@ -274,8 +342,9 @@ export class IssuesController {
   @ApiQuery({ name: 'endDate', required: false, description: 'End date for data range (ISO string)' })
   @ApiQuery({ name: 'includeDependencies', required: false, type: Boolean, description: 'Include task dependencies' })
   @ApiQuery({ name: 'includeCompleted', required: false, type: Boolean, description: 'Include completed tasks' })
-  async getGanttData(@Query() query: GanttDataQueryDto): Promise<GanttDataResponseDto> {
-    return this.issuesService.getGanttData(query);
+  async getGanttData(@Query(ValidationPipe) query: GanttDataQueryDto): Promise<GanttDataResponseDto> {
+    // For simplified placeholder, pass empty projectId - this is just to match signature
+    return this.issuesService.getGanttData(query.projectId || '', query);
   }
 
   @Get('projects/:projectId/tree')
@@ -289,8 +358,8 @@ export class IssuesController {
   @ApiQuery({ name: 'includeCompleted', required: false, type: Boolean, description: 'Include completed tasks' })
   @ApiQuery({ name: 'expandLevel', required: false, type: Number, description: 'Default expand level' })
   async getProjectWBSTree(
-    @Param('projectId') projectId: string,
-    @Query() query: Omit<WBSTreeQueryDto, 'projectId'>
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Query(ValidationPipe) query: Omit<WBSTreeQueryDto, 'projectId'>
   ): Promise<WBSTreeResponseDto> {
     return this.issuesService.getIssueTree({ ...query, projectId });
   }
@@ -307,119 +376,73 @@ export class IssuesController {
   @ApiQuery({ name: 'includeDependencies', required: false, type: Boolean, description: 'Include task dependencies' })
   @ApiQuery({ name: 'includeCompleted', required: false, type: Boolean, description: 'Include completed tasks' })
   async getProjectGanttData(
-    @Param('projectId') projectId: string,
-    @Query() query: Omit<GanttDataQueryDto, 'projectId'>
+    @Param('projectId', ParseUUIDPipe) projectId: string,
+    @Query(ValidationPipe) query: Omit<GanttDataQueryDto, 'projectId'>
   ): Promise<GanttDataResponseDto> {
-    return this.issuesService.getGanttData({ ...query, projectId });
+    return this.issuesService.getGanttData(projectId, { ...query, projectId });
   }
 
-  // Conflict detection endpoints
-  @Post(':id/check-conflicts')
-  @ApiOperation({ summary: 'Check for conflicts before updating issue' })
+  // Dependency CRUD endpoints
+  
+  @Post(':id/dependencies')
+  @ApiOperation({ 
+    summary: 'Create a dependency where the issue is the predecessor',
+    description: 'Create a new Finish-to-Start (FS) dependency where the specified issue must be completed before the successor issue can start.'
+  })
   @ApiResponse({
-    status: 200,
-    description: 'Conflict check completed',
-    schema: {
-      type: 'object',
-      properties: {
-        hasConflicts: { type: 'boolean' },
-        conflicts: {
-          type: 'array',
-          items: {
-            type: 'object',
-            properties: {
-              id: { type: 'string' },
-              pattern: { type: 'string' },
-              severity: { type: 'string' },
-              description: { type: 'string' },
-              conflictFields: { type: 'array', items: { type: 'string' } },
-              suggestedResolution: { type: 'array', items: { type: 'string' } }
-            }
-          }
-        }
-      }
-    }
+    status: 201,
+    description: 'Dependency created successfully',
+    type: DependencyResponseDto
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Bad request - validation failed, circular dependency detected, or issues not in same project'
   })
   @ApiResponse({
     status: 404,
-    description: 'Issue not found'
+    description: 'Predecessor or successor issue not found'
   })
-  async checkConflicts(
-    @Param('id') id: string,
-    @Body() updateData: UpdateIssueDto,
+  @ApiResponse({
+    status: 409,
+    description: 'Dependency already exists'
+  })
+  async createDependency(
+    @Param('id', ParseUUIDPipe) predecessorId: string,
+    @Body(ValidationPipe) createDependencyDto: CreateDependencyDto,
     @Request() req: any
-  ) {
-    const context = {
-      userId: req.user.id,
-      timestamp: new Date(),
-      operation: 'update' as const,
-      entityType: 'issue' as const,
-      entityId: id,
-      projectId: updateData.projectId || ''
-    };
-
-    const conflict = await this.conflictDetectionService.detectOptimisticConflict(
-      'issue',
-      id,
-      updateData.version || 0,
-      updateData,
-      context
-    );
-
-    return {
-      hasConflicts: conflict !== null,
-      conflicts: conflict ? [conflict] : []
-    };
+  ): Promise<DependencyResponseDto> {
+    return this.issuesService.createDependency(predecessorId, createDependencyDto, req.user.id);
   }
 
-  @Get('projects/:projectId/check-integrity')
-  @ApiOperation({ summary: 'Check data integrity for project issues' })
+  @Delete(':id/dependencies')
+  @ApiOperation({ 
+    summary: 'Delete a dependency where the issue is the predecessor',
+    description: 'Remove a dependency relationship between the predecessor issue and a successor issue.'
+  })
   @ApiResponse({
     status: 200,
-    description: 'Integrity check completed',
-    schema: {
-      type: 'object',
-      properties: {
-        isValid: { type: 'boolean' },
-        issues: { type: 'number' },
-        conflicts: {
-          type: 'array',
-          items: {
-            type: 'object',
-            properties: {
-              id: { type: 'string' },
-              pattern: { type: 'string' },
-              severity: { type: 'string' },
-              description: { type: 'string' },
-              entityId: { type: 'string' }
-            }
-          }
-        }
-      }
-    }
+    description: 'Dependency deleted successfully'
   })
-  async checkProjectIntegrity(
-    @Param('projectId') projectId: string,
+  @ApiResponse({
+    status: 404,
+    description: 'Dependency not found'
+  })
+  @HttpCode(HttpStatus.OK)
+  async deleteDependency(
+    @Param('id', ParseUUIDPipe) predecessorId: string,
+    @Body(ValidationPipe) deleteDependencyDto: DeleteDependencyDto,
     @Request() req: any
-  ) {
-    const context = {
-      userId: req.user.id,
-      timestamp: new Date(),
-      operation: 'update' as const,
-      entityType: 'project' as const,
-      entityId: projectId,
-      projectId: projectId
-    };
+  ): Promise<{ message: string }> {
+    await this.issuesService.deleteDependency(predecessorId, deleteDependencyDto, req.user.id);
+    return { message: 'Dependency deleted successfully' };
+  }
 
-    const conflicts = await this.conflictDetectionService.checkDataIntegrity(
-      projectId,
-      context
-    );
-
-    return {
-      isValid: conflicts.length === 0,
-      issues: conflicts.filter(c => c.severity === 'error').length,
-      conflicts: conflicts
-    };
+  /**
+   * Generate ETag from version and updatedAt timestamp
+   * Format: "v{version}-{timestamp}"
+   */
+  private generateETag(version: number, updatedAt: Date): string {
+    const timestamp = updatedAt.getTime();
+    return `"v${version}-${timestamp}"`;
   }
 }

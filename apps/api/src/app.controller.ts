@@ -39,11 +39,12 @@ export class AppController {
         status: { type: 'string' },
         timestamp: { type: 'string' },
         uptime: { type: 'number' },
-        database: { type: 'string' }
+        database: { type: 'string' },
+        environment: { type: 'string' }
       }
     }
   })
-  getDetailedHealth() {
+  async getDetailedHealth() {
     return this.appService.getDetailedHealth();
   }
 }
