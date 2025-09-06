@@ -1,10 +1,7 @@
 import type { Metadata } from 'next'
-import { Inter } from 'next/font/google'
 import { Header } from '@/components/navigation/Header'
 import { ProjectProvider } from '@/components/providers/ProjectProvider'
 import './globals.css'
-
-const inter = Inter({ subsets: ['latin'] })
 
 export const metadata: Metadata = {
   title: 'Gantt Chart WebUI',
@@ -18,7 +15,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="ja" className="h-full">
-      <body className={`${inter.className} h-full bg-gray-50 text-foreground`}>
+      <body className="h-full bg-gray-50 text-foreground font-sans">
         <ProjectProvider>
           <div className="min-h-full">
             <Header />

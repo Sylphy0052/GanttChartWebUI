@@ -30,6 +30,7 @@ export interface WBSTreeState {
   expandedNodeIds: Set<string>
   loading: boolean
   error?: string
+  reorderLoading: boolean
 }
 
 export interface WBSActions {
@@ -40,6 +41,8 @@ export interface WBSActions {
   expandAll: () => void
   collapseAll: () => void
   fetchTree: (projectId?: string) => Promise<void>
+  reorderNode: (nodeId: string, newIndex: number, siblingIds: string[]) => Promise<void>
+  changeParent: (nodeId: string, newParentId: string | null, newIndex: number) => Promise<void>
 }
 
 export type WBSStore = WBSTreeState & WBSActions
@@ -66,4 +69,12 @@ export interface WBSTreeMetrics {
   visibleNodes: number
   maxDepth: number
   renderTime: number
+}
+
+export interface DropZoneInfo {
+  nodeId: string
+  type: 'sibling' | 'parent'
+  position: 'above' | 'below' | 'inside'
+  isValid: boolean
+  reason?: string
 }
