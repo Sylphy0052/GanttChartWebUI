@@ -30,6 +30,7 @@ cp apps/web/.env.example apps/web/.env.local
 ```
 
 **Expected output:**
+
 ```
 [INFO] 開発環境を起動しています...
 [SUCCESS] 開発環境が起動しました
@@ -37,15 +38,30 @@ cp apps/web/.env.example apps/web/.env.local
 [INFO] API: http://localhost:3001
 ```
 
+**Available commands:**
+
+- `./scripts/docker-dev.sh start` - 開発環境を起動
+- `./scripts/docker-dev.sh stop` - 開発環境を停止  
+- `./scripts/docker-dev.sh restart` - 開発環境を再起動
+- `./scripts/docker-dev.sh logs` - 全サービスのログを表示
+- `./scripts/docker-dev.sh shell` - APIコンテナのシェルを開く
+- `./scripts/docker-dev.sh db` - PostgreSQLに接続
+- `./scripts/docker-dev.sh migrate` - データベースマイグレーション実行
+- `./scripts/docker-dev.sh seed` - シードデータを投入
+- `./scripts/docker-dev.sh clean` - 全てのコンテナとボリュームを削除
+- `./scripts/docker-dev.sh status` - サービス状況を確認
+
 ### 4. Verify Everything Works
 
 **Open in browser:**
-- 🌐 **Frontend**: [http://localhost:3000](http://localhost:3000) 
+
+- 🌐 **Frontend**: [http://localhost:3000](http://localhost:3000)
   - Should show: **"Gantt Chart WebUI"** landing page
 - 🔧 **API**: [http://localhost:3001/health](http://localhost:3001/health)
   - Should return: JSON health status
 
 **Or run automated verification:**
+
 ```bash
 ./scripts/validate-dev-workflow.sh
 ```
@@ -127,9 +143,9 @@ cp apps/web/.env.example apps/web/.env.local
 
 ## Success Checklist
 
-- [ ] Frontend accessible at http://localhost:3000
-- [ ] "Gantt Chart WebUI" title visible 
-- [ ] API accessible at http://localhost:3001/health
+- [ ] Frontend accessible at <http://localhost:3000>
+- [ ] "Gantt Chart WebUI" title visible
+- [ ] API accessible at <http://localhost:3001/health>
 - [ ] JSON health response returned
 - [ ] No error messages in `./scripts/docker-dev.sh logs`
 - [ ] Hot reload working (edit a file, see changes)
