@@ -8,7 +8,7 @@ RUN npm ci
 
 FROM base AS development
 COPY apps/api/package.json ./
-COPY prisma ./prisma
+COPY apps/api/prisma ./prisma
 RUN npm install
 RUN npx prisma generate
 COPY apps/api/. .

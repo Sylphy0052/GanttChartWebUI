@@ -42,7 +42,7 @@ services:
       - "3001:3001"
     volumes:
       - ./apps/api:/usr/src/app
-      - ./prisma:/usr/src/app/prisma
+      - ./apps/api/prisma:/usr/src/app/prisma
       - ./packages:/usr/src/packages
       - /usr/src/app/node_modules
     depends_on:

@@ -1,0 +1,181 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database - Production Configuration
+  postgres:
+    image: postgres:15-alpine
+    container_name: gantt-postgres-prod
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-gantt_chart}
+      POSTGRES_USER: ${POSTGRES_USER:-gantt_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_INITDB_ARGS: "--auth-host=scram-sha-256"
+    volumes:
+      - postgres_prod_data:/var/lib/postgresql/data
+      - ./apps/api/prisma/migrations:/docker-entrypoint-initdb.d/migrations:ro
+    ports:
+      - "5432:5432"
+    networks:
+      - gantt-prod-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-gantt_user} -d ${POSTGRES_DB:-gantt_chart}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+        reservations:
+          memory: 512M
+          cpus: '0.5'
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Redis Cache - Production Configuration
+  redis:
+    image: redis:7-alpine
+    container_name: gantt-redis-prod
+    command: redis-server --requirepass ${REDIS_PASSWORD} --maxmemory 256mb --maxmemory-policy allkeys-lru
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    volumes:
+      - redis_prod_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - gantt-prod-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 128M
+          cpus: '0.25'
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # API Service (NestJS) - Production Configuration
+  api:
+    build:
+      context: .
+      dockerfile: ./apps/api/Dockerfile
+      target: production
+    container_name: gantt-api-prod
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER:-gantt_user}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-gantt_chart}
+      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-gantt-chart-web-ui}
+      JWT_ISSUER: ${JWT_ISSUER:-gantt-chart-api}
+      PORT: 3001
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      CORS_ORIGIN: ${CORS_ORIGIN}
+    ports:
+      - "3001:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - gantt-prod-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+        reservations:
+          memory: 256M
+          cpus: '0.5'
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+    # Security: Run as non-root user
+    user: "node"
+
+  # Web Service (Next.js) - Production Configuration
+  web:
+    build:
+      context: .
+      dockerfile: ./apps/web/Dockerfile
+      target: production
+    container_name: gantt-web-prod
+    environment:
+      NODE_ENV: production
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3001}
+      NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE:-http://localhost:3001/api/v1}
+      NEXT_TELEMETRY_DISABLED: 1
+    ports:
+      - "3000:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - gantt-prod-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 128M
+          cpus: '0.25'
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+networks:
+  gantt-prod-network:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: br-gantt-prod
+
+volumes:
+  postgres_prod_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DATA_PATH:-./data}/postgres
+  redis_prod_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DATA_PATH:-./data}/redis
