@@ -42,11 +42,11 @@ const TOTAL_ISSUES = 1000
 const TREE_DEPTH = 3
 const BRANCHING = 5
 const USERS = [
-  { id: randomUUID(), name: '佐藤' },
-  { id: randomUUID(), name: '鈴木' },
-  { id: randomUUID(), name: '田中' },
-  { id: randomUUID(), name: '高橋' },
-  { id: randomUUID(), name: '伊藤' },
+  { id: randomUUID(), name: '佐藤', email: 'sato@example.com' },
+  { id: randomUUID(), name: '鈴木', email: 'suzuki@example.com' },
+  { id: randomUUID(), name: '田中', email: 'tanaka@example.com' },
+  { id: randomUUID(), name: '高橋', email: 'takahashi@example.com' },
+  { id: randomUUID(), name: '伊藤', email: 'ito@example.com' },
 ]
 const LABELS = ['frontend','backend','infra','bug','feature','urgent','lowrisk']
 const TYPES = ['feature','bug','spike','chore']
@@ -62,10 +62,30 @@ async function main() {
     prisma.dependency.deleteMany({}),
     prisma.issue.deleteMany({}),
     prisma.calendar.deleteMany({}),
+    prisma.projectMember.deleteMany({}),
     prisma.project.deleteMany({}),
+    prisma.user.deleteMany({}),
   ])
 
+  // Create users first
+  await prisma.user.createMany({
+    data: USERS.map(user => ({
+      id: user.id,
+      email: user.email,
+      name: user.name,
+    }))
+  })
+
   const project = await prisma.project.create({ data: { name: 'PoC Project', visibility: 'private' } })
+  
+  // Create project members
+  await prisma.projectMember.createMany({
+    data: USERS.map((user, index) => ({
+      projectId: project.id,
+      userId: user.id,
+      role: index === 0 ? 'owner' : 'member',
+    }))
+  })
   
   // Create default calendar
   await prisma.calendar.create({
@@ -80,6 +100,14 @@ async function main() {
 
   // Create hierarchical issues first (depth 3, branching 5)
   const created: { id: string; isLeaf: boolean }[] = []
+
+  // Order index counter for each parent
+  const orderCounters = new Map<string | null, number>()
+  const getNextOrder = (parentId: string | null): number => {
+    const current = orderCounters.get(parentId) || 0
+    orderCounters.set(parentId, current + 1)
+    return current
+  }
 
   let counter = 1
   async function createIssue(parentId: string | null, depth: number): Promise<string> {
@@ -97,6 +125,7 @@ async function main() {
       data: {
         projectId: project.id,
         parentIssueId: parentId,
+        orderIndex: getNextOrder(parentId), // Use proper order indexing
         title,
         description: 'Auto seeded',
         status,
@@ -110,6 +139,7 @@ async function main() {
         dueDate: due,
         progress,
         labels: Array.from(new Set([pick(LABELS), pick(LABELS)])).slice(0, rand(0,2)),
+        createdBy: pick(USERS).id, // Add required createdBy field
       },
       select: { id: true },
     })
@@ -141,6 +171,7 @@ async function main() {
       id: randomUUID(),
       projectId: project.id,
       parentIssueId: null as string | null,
+      orderIndex: getNextOrder(null), // Use proper order indexing for flat issues
       title: `Flat Issue ${i + 1}`,
       description: 'Auto seeded (flat)',
       status,
@@ -154,6 +185,7 @@ async function main() {
       dueDate: due,
       progress: done ? 100 : rand(0, 90),
       labels: Array.from(new Set([pick(LABELS), pick(LABELS)])).slice(0, rand(0,2)),
+      createdBy: pick(USERS).id, // Add required createdBy field
       createdAt: new Date(),
       updatedAt: new Date(),
     }
@@ -199,10 +231,11 @@ async function main() {
 
   console.log(`Project: ${project.id}`)
   const counts = await Promise.all([
+    prisma.user.count(),
     prisma.issue.count({ where: { projectId: project.id } }),
     prisma.dependency.count({ where: { projectId: project.id } }),
   ])
-  console.log(`Issues: ${counts[0]}, Dependencies: ${counts[1]}`)
+  console.log(`Users: ${counts[0]}, Issues: ${counts[1]}, Dependencies: ${counts[2]}`)
   console.timeEnd('seed')
 }
 
