@@ -1,0 +1,110 @@
+{
+  "phase": "scaffold",
+  "current_milestone": "M1",
+  "current_task": {
+    "id": "nestjs-init",
+    "title": "NestJSプロジェクト初期化",
+    "description": "バックエンドの基本構造とモジュール骨格の作成",
+    "milestone": "M1", 
+    "estimated_hours": 1.5,
+    "status": "in_progress",
+    "dependencies": ["docker-base"],
+    "files": ["backend/src/main.ts", "backend/package.json", "backend/src/app.module.ts"],
+    "started_at": "2025-09-07T02:00:00Z"
+  },
+  "next_tasks": [
+    {
+      "id": "nextjs-init",
+      "title": "Next.jsプロジェクト初期化",
+      "description": "フロントエンドの基本構造とページ骨格の作成",
+      "milestone": "M1",
+      "estimated_hours": 1.5,
+      "status": "ready", 
+      "dependencies": ["docker-base"],
+      "files": ["frontend/package.json", "frontend/pages/index.tsx", "frontend/next.config.js"]
+    },
+    {
+      "id": "env-config",
+      "title": "環境変数設定",
+      "description": ".envファイルとDocker環境変数の整備",
+      "milestone": "M0",
+      "estimated_hours": 0.5,
+      "status": "ready",
+      "dependencies": ["docker-base"],
+      "files": [".env", ".env.example"]
+    }
+  ],
+  "completed_tasks": [
+    {
+      "id": "docker-base",
+      "title": "Docker基盤構築",
+      "description": "docker-compose.yml、Dockerfile.backend、Dockerfile.frontend、nginx設定の作成",
+      "milestone": "M0",
+      "estimated_hours": 2,
+      "status": "completed",
+      "dependencies": [],
+      "files": ["docker-compose.yml", "infra/Dockerfile.backend", "infra/Dockerfile.frontend", "infra/nginx/nginx.conf"],
+      "started_at": "2025-09-07T00:00:00Z",
+      "completed_at": "2025-09-07T00:30:00Z"
+    },
+    {
+      "id": "prisma-schema",
+      "title": "Prismaスキーマ定義",
+      "description": "PostgreSQLスキーマ定義（Project, Issue, Comment, Dependency, ChangeLog, ImagePath等）",
+      "milestone": "M1",
+      "estimated_hours": 1.5,
+      "status": "completed",
+      "dependencies": ["docker-base"],
+      "files": ["backend/prisma/schema.prisma"],
+      "started_at": "2025-09-07T01:00:00Z",
+      "completed_at": "2025-09-07T01:30:00Z"
+    }
+  ],
+  "milestones": {
+    "M0": {
+      "name": "Docker環境構築",
+      "description": "compose, backend/frontend Dockerfile, nginx.conf",
+      "status": "in_progress"
+    },
+    "M1": {
+      "name": "基盤整備",
+      "description": "プロジェクト初期化とスキーマ定義",
+      "status": "pending"
+    },
+    "M2": {
+      "name": "データ層 & API骨格",
+      "description": "Prisma設定とCRUD API基盤",
+      "status": "pending"
+    },
+    "M3": {
+      "name": "プロジェクト管理機能",
+      "description": "プロジェクト管理 + 共通設定 + バックアップ/復元",
+      "status": "pending"
+    },
+    "M4": {
+      "name": "Issue機能",
+      "description": "Issue CRUD + コメント + 履歴 + 画像アップロード",
+      "status": "pending"
+    },
+    "M5": {
+      "name": "WBS機能",
+      "description": "WBS ツリー + 並び替え",
+      "status": "pending"
+    },
+    "M6": {
+      "name": "ガント機能",
+      "description": "ガント表示・依存関係・マイルストーン",
+      "status": "pending"
+    },
+    "M7": {
+      "name": "テスト・検証",
+      "description": "E2E・受け入れ試験・クリーンアップJob",
+      "status": "pending"
+    }
+  },
+  "kpis": {
+    "initial_render_ms_p95": 1500,
+    "drag_latency_ms_p95": 100
+  },
+  "updated_at": "2025-09-07T00:00:00Z"
+}
