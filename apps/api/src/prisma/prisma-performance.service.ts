@@ -15,19 +15,17 @@ export class PrismaPerformanceService extends PrismaClient implements OnModuleIn
   constructor() {
     super({
       // Connection pooling configuration
-      datasourceUrl: process.env.DATABASE_URL,
+      datasources: {
+        db: {
+          url: process.env.DATABASE_URL
+        }
+      },
       log: [
         { level: 'query', emit: 'event' },
         { level: 'error', emit: 'event' },
         { level: 'info', emit: 'event' },
         { level: 'warn', emit: 'event' },
-      ],
-      // Connection pool settings for performance
-      datasources: {
-        db: {
-          url: process.env.DATABASE_URL
-        }
-      }
+      ]
     });
   }
 
