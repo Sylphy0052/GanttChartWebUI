@@ -48,7 +48,7 @@ interface SyncOptions {
 class OfflineSyncManager {
   private operationQueue: QueuedOperation[] = []
   private syncInProgress = false
-  private isOnline = navigator.onLine
+  private isOnline = typeof navigator !== 'undefined' ? navigator.onLine : true
   private listeners: Set<(stats: SyncStats) => void> = new Set()
   private syncOptions: Required<SyncOptions> = {
     autoRetry: true,

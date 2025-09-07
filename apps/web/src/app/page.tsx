@@ -1,62 +1,48 @@
-import Link from 'next/link'
-
+// Minimal page to fix Application Error
 export default function HomePage() {
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
-      <div className="max-w-md w-full space-y-8">
-        <div className="text-center">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">
-            Gantt Chart WebUI
-          </h1>
-          <p className="text-gray-600 mb-8">
-            Issue management with Gantt chart visualization
-          </p>
-          
-          <div className="space-y-4">
-            <Link
-              href="/login"
-              className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-primary hover:bg-primary/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary"
-            >
+    <div style={{ padding: '20px', fontFamily: 'Arial, sans-serif' }}>
+      <h1>Gantt Chart WebUI</h1>
+      <p>Issue management with Gantt chart visualization</p>
+      
+      <div style={{ marginTop: '20px' }}>
+        <h2>Available Pages:</h2>
+        <ul style={{ listStyle: 'disc', marginLeft: '20px' }}>
+          <li>
+            <a href="/login" style={{ color: 'blue', textDecoration: 'underline' }}>
               ログイン
-            </Link>
-            
-            <Link
-              href="/project"
-              className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
-            >
+            </a>
+          </li>
+          <li>
+            <a href="/project" style={{ color: 'blue', textDecoration: 'underline' }}>
               プロジェクトビュー（WBS + Gantt）
-            </Link>
-            
-            <Link
-              href="/issues"
-              className="w-full flex justify-center py-2 px-4 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary"
-            >
+            </a>
+          </li>
+          <li>
+            <a href="/issues" style={{ color: 'blue', textDecoration: 'underline' }}>
               Issue一覧（ゲスト）
-            </Link>
-
-            <Link
-              href="/wbs"
-              className="w-full flex justify-center py-2 px-4 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-primary"
-            >
+            </a>
+          </li>
+          <li>
+            <a href="/wbs" style={{ color: 'blue', textDecoration: 'underline' }}>
               WBSツリー
-            </Link>
-          </div>
+            </a>
+          </li>
+        </ul>
+      </div>
+      
+      <div style={{ marginTop: '30px', borderTop: '1px solid #ccc', paddingTop: '20px' }}>
+        <h3>デモアカウント</h3>
+        <div>
+          <strong>管理者:</strong> admin@example.com / admin123<br/>
+          <strong>一般ユーザー:</strong> user@example.com / user123<br/>
+          <strong>デモユーザー:</strong> demo@example.com / demo123
         </div>
-        
-        <div className="mt-8 border-t pt-6">
-          <h2 className="text-lg font-semibold mb-3">デモアカウント</h2>
-          <div className="space-y-2 text-sm text-gray-600">
-            <div>
-              <span className="font-medium">管理者:</span> admin@example.com / admin123
-            </div>
-            <div>
-              <span className="font-medium">一般ユーザー:</span> user@example.com / user123
-            </div>
-            <div>
-              <span className="font-medium">デモユーザー:</span> demo@example.com / demo123
-            </div>
-          </div>
-        </div>
+      </div>
+      
+      <div style={{ marginTop: '30px', fontSize: '14px', color: '#666' }}>
+        <p>API Status: Available at <a href="/api/health" style={{ color: 'blue' }}>/api/health</a></p>
+        <p>API Documentation: <a href="http://localhost:3001/api/docs" target="_blank" style={{ color: 'blue' }}>http://localhost:3001/api/docs</a></p>
       </div>
     </div>
   )
