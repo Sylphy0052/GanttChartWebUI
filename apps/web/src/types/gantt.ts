@@ -1,5 +1,6 @@
 import { ScaleTime, ScaleBand } from 'd3-scale'
 import { SchedulingResult } from './scheduling'
+import { StateSnapshot } from '@/lib/api-client'
 
 export type GanttTimeScale = 'day' | 'week' | 'month' | 'quarter'
 
@@ -23,6 +24,7 @@ export interface GanttTask {
   color?: string
   type?: 'task' | 'milestone' | 'summary'
   milestoneDate?: Date
+  version?: number // AC1: Add version for optimistic locking
 }
 
 export interface GanttDependency {
@@ -34,6 +36,7 @@ export interface GanttDependency {
   type: 'FS' | 'SS' | 'FF' | 'SF'
   lag: number
   lagUnit: 'days' | 'hours'
+  version?: number // AC1: Add version for optimistic locking
 }
 
 export interface GanttTimelineConfig extends GanttConfig {
@@ -50,6 +53,8 @@ export interface GanttViewport {
   taskHeight: number
   headerHeight: number
   getDatePosition: (date: Date) => number
+  scrollLeft?: number // AC1: Add scroll position for conflict resolution
+  scrollTop?: number  // AC1: Add scroll position for conflict resolution
 }
 
 export interface GanttInteraction {
@@ -77,9 +82,9 @@ export interface GanttState {
 
 export interface GanttActions {
   setTasks: (tasks: GanttTask[]) => void
-  updateTask: (taskId: string, updates: Partial<GanttTask>) => void
-  moveTask: (taskId: string, newStartDate: Date, newEndDate: Date) => void
-  resizeTask: (taskId: string, newStartDate: Date, newEndDate: Date) => void
+  updateTask: (taskId: string, updates: Partial<GanttTask>) => Promise<void> // AC1: Made async for conflict resolution
+  moveTask: (taskId: string, newStartDate: Date, newEndDate: Date) => Promise<void> // AC1: Made async
+  resizeTask: (taskId: string, newStartDate: Date, newEndDate: Date) => Promise<void> // AC1: Made async
   selectTask: (taskId: string) => void
   selectMultipleTasks: (taskIds: string[]) => void
   clearSelection: () => void
@@ -91,29 +96,21 @@ export interface GanttActions {
   zoomOut: () => void
   zoomToFit: () => void
   scrollToToday: () => void
-  addDependency: (dependency: Omit<GanttDependency, 'id'>) => void
-  removeDependency: (dependencyId: string) => void
+  addDependency: (dependency: Omit<GanttDependency, 'id'>) => Promise<void> // AC1: Made async
+  removeDependency: (dependencyId: string) => Promise<void> // AC1: Made async
   fetchGanttData: (projectId?: string) => Promise<void>
   setViewportSize: (width: number, height: number) => void
   updateViewport: () => void
   setLastCalculationResult: (result: SchedulingResult | undefined) => void
+  
+  // AC1: New conflict resolution methods
+  getStateSnapshot: () => any
+  clearErrors: () => void
+  getRollbackHistory: () => StateSnapshot[]
+  clearRollbackHistory: (prefix?: string) => void
 }
 
 export type GanttStore = GanttState & GanttActions
-
-export interface GanttBarPosition {
-  x: number
-  y: number
-  width: number
-  height: number
-}
-
-export interface GanttGridLine {
-  type: 'major' | 'minor' | 'today'
-  x: number
-  date: Date
-  label?: string
-}
 
 export interface GanttConfig {
   scale: GanttTimeScale
@@ -127,99 +124,14 @@ export interface GanttConfig {
   headerHeight: number
 }
 
-export interface GanttTooltipData {
-  task: GanttTask
-  position: { x: number; y: number }
-  type: 'task' | 'dependency' | 'milestone'
-}
-
-export interface GanttContextMenuData {
-  task: GanttTask
-  position: { x: number; y: number }
-  actions: GanttContextMenuAction[]
-}
-
-export interface GanttContextMenuAction {
-  label: string
-  icon?: string
-  action: () => void
-  disabled?: boolean
-  divider?: boolean
-}
-
-export interface GanttPerformanceMetrics {
-  renderTime: number
-  scrollPerformance: number
-  taskCount: number
-  visibleTaskCount: number
-  memoryUsage?: number
-}
-
-export interface GanttExportOptions {
-  format: 'png' | 'svg' | 'pdf'
-  dateRange?: { start: Date; end: Date }
-  includeDependencies: boolean
-  includeDetails: boolean
-  scale: GanttTimeScale
-}
-
-export interface GanttUndoRedoState {
-  past: GanttTask[][]
-  present: GanttTask[]
-  future: GanttTask[][]
-}
-
-export interface GanttKeyboardShortcuts {
-  'ctrl+z': () => void
-  'ctrl+y': () => void
-  'ctrl+a': () => void
-  'delete': () => void
-  'escape': () => void
-  'plus': () => void
-  'minus': () => void
-  'home': () => void
-  'end': () => void
-}
-
-export interface GanttMilestone {
+// AC1: Gantt-specific conflict types
+export interface GanttConflict {
   id: string
-  title: string
-  description?: string
-  date: Date
-  type: 'project_start' | 'project_end' | 'phase_completion' | 'delivery' | 'review' | 'custom'
-  priority: 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'
-  status: 'PENDING' | 'ACHIEVED' | 'MISSED' | 'AT_RISK'
-  achievedDate?: Date
-  relatedTaskIds: string[]
-  color?: string
-  icon?: string
-}
-
-export interface GanttCriticalPath {
-  tasks: GanttTask[]
-  totalDuration: number
-  startDate: Date
-  endDate: Date
-  slackTime: number
-}
-
-export interface GanttProgressSummary {
-  totalTasks: number
-  completedTasks: number
-  inProgressTasks: number
-  overdueTasks: number
-  completionPercentage: number
-  estimatedCompletionDate: Date
-  currentProgress: {
-    onTime: number
-    delayed: number
-    ahead: number
-  }
-}
-
-export interface GanttMilestoneViewOptions {
-  showMilestones: boolean
-  milestoneTypes: GanttMilestone['type'][]
-  showMilestoneConnections: boolean
-  showMilestoneProgress: boolean
+  type: 'task_move' | 'task_resize' | 'task_update' | 'dependency_change'
+  affectedTaskIds: string[]
+  conflictingFields: string[]
+  localChanges: any
+  remoteChanges: any
+  suggestedResolution?: string
+  priority: 'high' | 'medium' | 'low'
 }
