@@ -1,0 +1,180 @@
+// Prisma Schema for Issue/WBS/Gantt Web Application
+// PostgreSQL 15 対応, Asia/Tokyo タイムゾーン, 論理削除対応
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// プロジェクト
+model Project {
+  id                    String   @id @default(cuid())
+  name                  String   @unique
+  description_md        String?  @db.Text
+  shared_password_hash  String?
+  created_at           DateTime @default(now()) @db.Timestamptz(3)
+  updated_at           DateTime @updatedAt @db.Timestamptz(3)
+  is_deleted           Boolean  @default(false)
+
+  // リレーション
+  issues       Issue[]
+  dependencies Dependency[]
+  change_logs  ChangeLog[]
+
+  @@map("projects")
+  @@index([is_deleted])
+  @@index([name])
+}
+
+// グローバル設定（固定休日設定）
+model GlobalSettings {
+  id             String   @id @default(cuid())
+  weekend_off    Boolean  @default(true) // 土日休みON/OFF
+  holiday_dates  String[] // 固定休日日付配列 (YYYY-MM-DD形式)
+  created_at     DateTime @default(now()) @db.Timestamptz(3)
+  updated_at     DateTime @updatedAt @db.Timestamptz(3)
+
+  @@map("global_settings")
+}
+
+// Issue（タスク）
+model Issue {
+  id             String    @id @default(cuid())
+  project_id     String
+  parent_id      String?   // 親Issue（階層構造）
+  title          String
+  description_md String?   @db.Text
+  assignee       String?
+  status         IssueStatus @default(open)
+  start_date     DateTime? @db.Date
+  end_date       DateTime? @db.Date
+  progress_pct   Int       @default(0) // 進捗率 0-100
+  effort_hours   Float?    // 工数（時間）
+  is_blocked     Boolean   @default(false)
+  sort_order     Int       @default(0)
+  labels         String[]  // ラベル配列
+  version        Int       @default(1) // 楽観ロック用
+  is_deleted     Boolean   @default(false)
+  deleted_at     DateTime? @db.Timestamptz(3)
+  created_at     DateTime  @default(now()) @db.Timestamptz(3)
+  updated_at     DateTime  @updatedAt @db.Timestamptz(3)
+
+  // リレーション
+  project               Project      @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  parent                Issue?       @relation("IssueHierarchy", fields: [parent_id], references: [id])
+  children              Issue[]      @relation("IssueHierarchy")
+  comments              Comment[]
+  images                ImagePath[]
+  predecessor_deps      Dependency[] @relation("PredecessorDependencies")
+  successor_deps        Dependency[] @relation("SuccessorDependencies")
+  change_logs           ChangeLog[]
+
+  @@map("issues")
+  @@index([project_id, is_deleted])
+  @@index([parent_id])
+  @@index([status])
+  @@index([start_date])
+  @@index([end_date])
+  @@index([assignee])
+  @@index([sort_order])
+  @@index([deleted_at])
+}
+
+// 依存関係
+model Dependency {
+  id                    String         @id @default(cuid())
+  project_id            String
+  predecessor_issue_id  String
+  successor_issue_id    String
+  type                  DependencyType @default(FS) // MVP はFS（Finish-to-Start）のみ
+  created_at            DateTime       @default(now()) @db.Timestamptz(3)
+
+  // リレーション
+  project          Project @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  predecessor      Issue   @relation("PredecessorDependencies", fields: [predecessor_issue_id], references: [id], onDelete: Cascade)
+  successor        Issue   @relation("SuccessorDependencies", fields: [successor_issue_id], references: [id], onDelete: Cascade)
+
+  @@map("dependencies")
+  @@unique([predecessor_issue_id, successor_issue_id])
+  @@index([project_id])
+  @@index([predecessor_issue_id])
+  @@index([successor_issue_id])
+}
+
+// コメント
+model Comment {
+  id         String   @id @default(cuid())
+  issue_id   String
+  author     String
+  body_md    String   @db.Text
+  edited     Boolean  @default(false) // 編集済みフラグ
+  created_at DateTime @default(now()) @db.Timestamptz(3)
+  updated_at DateTime @updatedAt @db.Timestamptz(3)
+
+  // リレーション
+  issue Issue @relation(fields: [issue_id], references: [id], onDelete: Cascade)
+
+  @@map("comments")
+  @@index([issue_id])
+  @@index([created_at])
+}
+
+// 変更ログ
+model ChangeLog {
+  id          String           @id @default(cuid())
+  entity_type ChangeEntityType // Project, Issue, Comment, etc.
+  entity_id   String          // 対象エンティティのID
+  project_id  String?         // プロジェクトID（検索用）
+  diff_json   Json            // 変更差分をJSON形式で保存
+  user_hint   String?         // ユーザー識別ヒント
+  created_at  DateTime        @default(now()) @db.Timestamptz(3)
+
+  // リレーション
+  project Project? @relation(fields: [project_id], references: [id], onDelete: Cascade)
+  issue   Issue?   @relation(fields: [entity_id], references: [id], onDelete: Cascade)
+
+  @@map("change_logs")
+  @@index([entity_type, entity_id])
+  @@index([project_id])
+  @@index([created_at])
+}
+
+// 画像パス
+model ImagePath {
+  id         String   @id @default(cuid())
+  issue_id   String
+  path       String   // UUIDファイル名 + 拡張子
+  created_at DateTime @default(now()) @db.Timestamptz(3)
+
+  // リレーション
+  issue Issue @relation(fields: [issue_id], references: [id], onDelete: Cascade)
+
+  @@map("image_paths")
+  @@index([issue_id])
+  @@unique([path])
+}
+
+// Enums
+
+enum IssueStatus {
+  open
+  in_progress
+  done
+  blocked
+}
+
+enum DependencyType {
+  FS // Finish-to-Start (MVPはFSのみ)
+}
+
+enum ChangeEntityType {
+  Project
+  Issue
+  Comment
+  Dependency
+  GlobalSettings
+}
