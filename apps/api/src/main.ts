@@ -6,6 +6,23 @@ import { AppModule } from './app.module';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
+  // Raw body middleware for webhook signature validation
+  app.use('/integrations/webhook', (req, res, next) => {
+    if (req.headers['content-type'] && req.headers['content-type'].includes('application/json')) {
+      let data = '';
+      req.setEncoding('utf8');
+      req.on('data', (chunk) => {
+        data += chunk;
+      });
+      req.on('end', () => {
+        (req as any).rawBody = data;
+        next();
+      });
+    } else {
+      next();
+    }
+  });
+
   // CORS設定
   app.enableCors({
     origin: process.env.NODE_ENV === 'production' 
@@ -28,6 +45,7 @@ async function bootstrap() {
       .setDescription('Issue management and Gantt chart API')
       .setVersion('1.0')
       .addBearerAuth()
+      .addTag('integrations', 'External system integrations and webhooks')
       .build();
     const document = SwaggerModule.createDocument(app, config);
     SwaggerModule.setup('api/docs', app, document);

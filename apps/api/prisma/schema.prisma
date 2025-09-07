@@ -24,6 +24,7 @@ model User {
   activityLogs     ActivityLog[]   @relation("ActivityActor")
   computedSchedules ComputedSchedule[] @relation("ScheduleCalculator")
   adminOverrides   AdminOverrideToken[] @relation("AdminOverrideUser")
+  businessMetrics  BusinessMetric[] @relation("UserMetrics")
   
   @@map("users")
 }
@@ -72,6 +73,8 @@ model Project {
   rateLimitAttempts RateLimitAttempt[]
   authSessions      AuthSession[]
   adminOverrides    AdminOverrideToken[]
+  businessMetrics   BusinessMetric[]
+  roiReports        ROIReport[]
   
   @@index([visibility])
   @@map("projects")
@@ -358,4 +361,75 @@ model TaskScheduleHistory {
   @@map("task_schedule_history") 
   @@index([taskId, computedScheduleId])
   @@index([computedScheduleId, criticalPath])
+}
+
+// ROI and Business Metrics tracking
+model BusinessMetric {
+  id            String   @id @default(uuid())
+  projectId     String   @map("project_id")
+  userId        String?  @map("user_id")
+  metricType    String   @map("metric_type") // 'productivity' | 'visibility' | 'manual_reduction' | 'adoption' | 'engagement'
+  category      String   // 'planning_time' | 'update_frequency' | 'task_completion' | 'user_satisfaction' | 'system_usage'
+  
+  // Metric values
+  value         Float
+  unit          String   // 'minutes' | 'hours' | 'percentage' | 'count' | 'score'
+  baseline      Float?   // Baseline value for comparison
+  target        Float?   // Target value for goals
+  
+  // Context
+  period        String   @map("period") // 'daily' | 'weekly' | 'monthly'
+  metadata      Json?    // Additional contextual data
+  
+  // Timestamps
+  measuredAt    DateTime @map("measured_at")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+  
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user    User?   @relation("UserMetrics", fields: [userId], references: [id], onDelete: SetNull)
+  
+  @@index([projectId, metricType, measuredAt])
+  @@index([projectId, period, measuredAt])
+  @@index([userId, metricType])
+  @@map("business_metrics")
+}
+
+// ROI calculation and tracking
+model ROIReport {
+  id              String   @id @default(uuid())
+  projectId       String   @map("project_id")
+  reportPeriod    String   @map("report_period") // 'monthly' | 'quarterly' | 'yearly'
+  startDate       DateTime @map("start_date")
+  endDate         DateTime @map("end_date")
+  
+  // Financial metrics
+  totalInvestment Float    @map("total_investment")
+  totalBenefit    Float    @map("total_benefit")
+  netBenefit      Float    @map("net_benefit")
+  roiPercentage   Float    @map("roi_percentage")
+  
+  // Business impact
+  productivityGain      Float    @map("productivity_gain") // Hours saved
+  visibilityImprovement Float    @map("visibility_improvement") // Percentage
+  manualWorkReduction   Float    @map("manual_work_reduction") // Hours saved
+  userAdoptionRate      Float    @map("user_adoption_rate") // Percentage
+  engagementScore       Float    @map("engagement_score") // 1-100
+  
+  // Breakdown by categories
+  metricsBreakdown      Json     @map("metrics_breakdown")
+  insights              Json?    // Generated insights
+  recommendations       Json?    // Recommendations for improvement
+  
+  // Status
+  status         String   @default("draft") // 'draft' | 'published' | 'archived'
+  publishedAt    DateTime? @map("published_at")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+  
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  
+  @@index([projectId, reportPeriod, startDate])
+  @@index([projectId, status])
+  @@map("roi_reports")
 }
