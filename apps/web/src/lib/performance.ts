@@ -63,6 +63,7 @@ export class PerformanceMonitor {
   private metrics: GanttPerformanceMetrics[] = []
   private activeMeasurements = new Map<string, PerformanceMeasurement>()
   private maxHistorySize = 100
+  private lastRenderTime = 0
   
   private readonly thresholds: PerformanceThresholds = {
     initialRenderTime: 1500,    // 1.5 seconds
@@ -119,6 +120,7 @@ export class PerformanceMonitor {
     this.startMeasurement('initial-render')
     const result = renderFn()
     const duration = this.endMeasurement('initial-render') || 0
+    this.lastRenderTime = duration
     
     return { result, duration }
   }
@@ -159,6 +161,14 @@ export class PerformanceMonitor {
       return Math.round(memory.usedJSHeapSize / 1024 / 1024 * 100) / 100
     }
     return 0
+  }
+
+  /**
+   * Get last recorded render time
+   * @returns Last render time in milliseconds
+   */
+  getLastRenderTime(): number {
+    return this.lastRenderTime
   }
 
   /**
@@ -366,6 +376,87 @@ Overall Status: ${this.isPerformanceAcceptable() ? '✅ GOOD' : '❌ NEEDS ATTEN
    */
   getThresholds(): PerformanceThresholds {
     return { ...this.thresholds }
+  }
+
+  /**
+   * Get Web Vitals metrics if available
+   * @returns Web Vitals data or null if not available
+   */
+  getWebVitals(): Record<string, number> | null {
+    try {
+      const navigation = performance.getEntriesByType('navigation')[0] as PerformanceNavigationTiming
+      const paint = performance.getEntriesByType('paint')
+      
+      return {
+        domContentLoaded: (navigation?.domContentLoadedEventEnd || 0) - (navigation?.fetchStart || 0),
+        loadComplete: (navigation?.loadEventEnd || 0) - (navigation?.fetchStart || 0),
+        firstPaint: paint.find(p => p.name === 'first-paint')?.startTime || 0,
+        firstContentfulPaint: paint.find(p => p.name === 'first-contentful-paint')?.startTime || 0,
+        domInteractive: (navigation?.domInteractive || 0) - (navigation?.fetchStart || 0)
+      }
+    } catch (error) {
+      return null
+    }
+  }
+
+  /**
+   * Get frame rate estimation
+   * @returns Estimated frame rate in fps
+   */
+  getFrameRate(): number {
+    if (this.lastRenderTime > 0) {
+      return Math.min(60, Math.round(1000 / this.lastRenderTime))
+    }
+    return 60 // Assume 60fps if no render time recorded
+  }
+
+  /**
+   * Check for performance regression compared to baseline
+   * @param baselineMetrics Previous metrics to compare against
+   * @returns Regression analysis or null if no regression
+   */
+  checkPerformanceRegression(baselineMetrics: GanttPerformanceMetrics): {
+    hasRegression: boolean
+    regressions: Array<{
+      metric: string
+      baseline: number
+      current: number
+      percentageIncrease: number
+    }>
+  } | null {
+    const current = this.getLatestMetrics()
+    if (!current) return null
+
+    const regressions: Array<{
+      metric: string
+      baseline: number
+      current: number
+      percentageIncrease: number
+    }> = []
+
+    const checks = [
+      { key: 'initialRenderTime', baseline: baselineMetrics.initialRenderTime, current: current.initialRenderTime },
+      { key: 'dragResponseTime', baseline: baselineMetrics.dragResponseTime, current: current.dragResponseTime },
+      { key: 'zoomTransitionTime', baseline: baselineMetrics.zoomTransitionTime, current: current.zoomTransitionTime },
+      { key: 'memoryUsage', baseline: baselineMetrics.memoryUsage, current: current.memoryUsage }
+    ]
+
+    checks.forEach(check => {
+      if (check.baseline > 0 && check.current > check.baseline * 1.2) { // 20% regression threshold
+        const percentageIncrease = ((check.current - check.baseline) / check.baseline) * 100
+        regressions.push({
+          metric: check.key,
+          baseline: check.baseline,
+          current: check.current,
+          percentageIncrease: Math.round(percentageIncrease * 100) / 100
+        })
+      }
+    })
+
+    return {
+      hasRegression: regressions.length > 0,
+      regressions
+    }
   }
 
   /**
