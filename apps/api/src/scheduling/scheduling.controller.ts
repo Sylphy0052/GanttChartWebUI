@@ -64,47 +64,11 @@ export class SchedulingController {
   }
 
   // AC7: Incremental update endpoint for performance optimization
-  @Post('calculate/incremental')
-  @ApiOperation({ 
-    summary: 'Calculate incremental schedule updates for changed tasks',
-    description: 'Optimized endpoint that only recalculates affected task chains for performance'
-  })
+  @Post('incremental-update')
+  @ApiOperation({ summary: 'Calculate incremental schedule update for performance optimization' })
   @ApiResponse({
     status: 200,
-    description: 'Incremental schedule update completed successfully',
-    schema: {
-      type: 'object',
-      properties: {
-        affectedTaskIds: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'IDs of tasks affected by the changes'
-        },
-        updatedTaskSchedules: {
-          type: 'array',
-          items: {
-            $ref: '#/components/schemas/TaskSchedule'
-          },
-          description: 'Updated schedule information for affected tasks'
-        },
-        newCriticalPath: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'Updated critical path after changes'
-        },
-        performanceMetrics: {
-          type: 'object',
-          properties: {
-            tasksRecalculated: { type: 'number' },
-            calculationTime: { type: 'number' },
-            optimizationRatio: { 
-              type: 'number',
-              description: 'Ratio of recalculated tasks to total tasks (lower is better)'
-            }
-          }
-        }
-      }
-    }
+    description: 'Incremental update calculated successfully'
   })
   @ApiResponse({
     status: 400,
@@ -121,7 +85,7 @@ export class SchedulingController {
       scheduleRequest: ScheduleCalculateRequest;
     },
     @Request() req: any
-  ) {
+  ): Promise<import('./scheduling.service').IncrementalUpdateResult> {
     const userId = req.user?.id;
     return this.schedulingService.calculateIncrementalUpdate(
       projectId,
