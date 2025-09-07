@@ -1,0 +1,17 @@
+import { Module } from '@nestjs/common';
+import { PrismaService } from './database/prisma.service';
+
+/**
+ * AppModule - アプリケーションのルートモジュール
+ * 
+ * MVP段階での最小構成:
+ * - PrismaServiceのグローバル提供
+ * - データベース接続管理
+ */
+@Module({
+  imports: [],
+  controllers: [],
+  providers: [PrismaService],
+  exports: [PrismaService], // 他のモジュールからアクセス可能にする
+})
+export class AppModule {}
