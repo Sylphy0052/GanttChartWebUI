@@ -1,20 +1,24 @@
-name: E2E Tests
+name: E2E Tests - Comprehensive Suite
 
 on:
   push:
     branches: [ main, develop ]
   pull_request:
     branches: [ main, develop ]
+  schedule:
+    # Run full test suite nightly at 2 AM UTC
+    - cron: '0 2 * * *'
 
 jobs:
-  e2e-tests:
+  # AC2: Cross-browser compatibility testing
+  cross-browser-tests:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
 
     strategy:
       fail-fast: false
       matrix:
-        browser: [chromium]
+        browser: [chromium-desktop, firefox-desktop, webkit-desktop, edge-desktop]
 
     steps:
       - name: Checkout repository
@@ -40,32 +44,128 @@ jobs:
         working-directory: apps/web
 
       - name: Wait for server to be ready
-        run: npx wait-on http://localhost:3000 --timeout 60000
+        run: npx wait-on http://localhost:3001 --timeout 120000
 
-      - name: Run E2E tests
-        run: npx turbo run e2e
+      - name: Run cross-browser tests
+        run: npm run e2e:cross-browser
+        working-directory: apps/web
         env:
           CI: true
 
-      - name: Upload test results
+      - name: Upload browser test results
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: playwright-report-${{ matrix.browser }}
+          name: cross-browser-report-${{ matrix.browser }}
           path: apps/web/playwright-report/
           retention-days: 7
 
-      - name: Upload test videos
-        uses: actions/upload-artifact@v4
-        if: failure()
-        with:
-          name: playwright-videos-${{ matrix.browser }}
-          path: apps/web/test-results/
-          retention-days: 3
+  # AC3: Responsive design testing
+  responsive-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
 
-      - name: Comment PR with test results
+    strategy:
+      fail-fast: false
+      matrix:
+        device: [mobile-chrome, mobile-safari, tablet-chrome]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps
+
+      - name: Build application
+        run: npx turbo run build
+
+      - name: Start development server
+        run: npm run dev &
+        working-directory: apps/web
+
+      - name: Wait for server to be ready
+        run: npx wait-on http://localhost:3001 --timeout 120000
+
+      - name: Run responsive design tests
+        run: npm run e2e:responsive
+        working-directory: apps/web
+        env:
+          CI: true
+
+      - name: Upload responsive test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: responsive-report-${{ matrix.device }}
+          path: apps/web/playwright-report/
+          retention-days: 7
+
+      - name: Upload responsive screenshots
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: responsive-screenshots-${{ matrix.device }}
+          path: apps/web/e2e/screenshots/
+          retention-days: 5
+
+  # AC4: Performance benchmarks testing
+  performance-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install chromium --with-deps
+
+      - name: Build application
+        run: npx turbo run build
+
+      - name: Start development server
+        run: npm run dev &
+        working-directory: apps/web
+
+      - name: Wait for server to be ready
+        run: npx wait-on http://localhost:3001 --timeout 120000
+
+      - name: Run performance tests
+        run: npm run e2e:performance
+        working-directory: apps/web
+        env:
+          CI: true
+
+      - name: Upload performance results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: performance-report
+          path: apps/web/playwright-report/
+          retention-days: 30
+
+      - name: Comment PR with performance results
         uses: actions/github-script@v7
-        if: github.event_name == 'pull_request' && always()
+        if: github.event_name == 'pull_request'
         with:
           script: |
             const fs = require('fs');
@@ -73,23 +173,357 @@ jobs:
             
             if (fs.existsSync(path)) {
               const results = JSON.parse(fs.readFileSync(path, 'utf8'));
-              const passed = results.suites.reduce((acc, suite) => acc + suite.specs.filter(spec => spec.ok).length, 0);
-              const total = results.suites.reduce((acc, suite) => acc + suite.specs.length, 0);
-              const successRate = ((passed / total) * 100).toFixed(1);
               
-              const body = `## 🧪 E2E Test Results
+              // Extract performance metrics from test results
+              const performanceTests = results.suites?.find(s => s.title.includes('Performance'))?.specs || [];
               
-              **Browser**: ${{ matrix.browser }}
-              **Success Rate**: ${successRate}% (${passed}/${total} tests)
+              let performanceBody = '## ⚡ Performance Test Results\n\n';
               
-              ${passed === total ? '✅ All tests passed!' : '❌ Some tests failed. Check the detailed report.'}
+              if (performanceTests.length > 0) {
+                performanceBody += '| Test | Status | Duration |\n|------|--------|----------|\n';
+                performanceTests.forEach(test => {
+                  const status = test.ok ? '✅' : '❌';
+                  const duration = `${(test.duration / 1000).toFixed(2)}s`;
+                  performanceBody += `| ${test.title} | ${status} | ${duration} |\n`;
+                });
+              } else {
+                performanceBody += 'No performance test results found.\n';
+              }
               
-              [View detailed report](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})`;
+              performanceBody += '\n[View detailed performance report](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})';
               
               github.rest.issues.createComment({
                 issue_number: context.issue.number,
                 owner: context.repo.owner,
                 repo: context.repo.repo,
-                body: body
+                body: performanceBody
+              });
+            }
+
+  # AC7: Accessibility compliance testing
+  accessibility-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install chromium --with-deps
+
+      - name: Build application
+        run: npx turbo run build
+
+      - name: Start development server
+        run: npm run dev &
+        working-directory: apps/web
+
+      - name: Wait for server to be ready
+        run: npx wait-on http://localhost:3001 --timeout 120000
+
+      - name: Run accessibility tests
+        run: npm run e2e:accessibility
+        working-directory: apps/web
+        env:
+          CI: true
+
+      - name: Upload accessibility results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: accessibility-report
+          path: apps/web/playwright-report/
+          retention-days: 30
+
+      - name: Comment PR with accessibility results
+        uses: actions/github-script@v7
+        if: github.event_name == 'pull_request'
+        with:
+          script: |
+            const fs = require('fs');
+            const path = 'apps/web/playwright-report/results.json';
+            
+            if (fs.existsSync(path)) {
+              const results = JSON.parse(fs.readFileSync(path, 'utf8'));
+              
+              const a11yTests = results.suites?.find(s => s.title.includes('Accessibility'))?.specs || [];
+              
+              let a11yBody = '## ♿ Accessibility Test Results\n\n';
+              
+              if (a11yTests.length > 0) {
+                const passed = a11yTests.filter(spec => spec.ok).length;
+                const total = a11yTests.length;
+                const successRate = ((passed / total) * 100).toFixed(1);
+                
+                a11yBody += `**WCAG 2.1 AA Compliance**: ${successRate}% (${passed}/${total} tests)\n\n`;
+                
+                if (passed === total) {
+                  a11yBody += '✅ All accessibility tests passed!\n';
+                } else {
+                  a11yBody += '❌ Some accessibility issues found. Please review:\n\n';
+                  a11yTests.filter(spec => !spec.ok).forEach(spec => {
+                    a11yBody += `- ❌ ${spec.title}\n`;
+                  });
+                }
+              }
+              
+              a11yBody += '\n[View detailed accessibility report](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})';
+              
+              github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: a11yBody
+              });
+            }
+
+  # AC1: Critical user journeys testing
+  critical-journeys:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps
+
+      - name: Build application
+        run: npx turbo run build
+
+      - name: Start development server
+        run: npm run dev &
+        working-directory: apps/web
+
+      - name: Wait for server to be ready
+        run: npx wait-on http://localhost:3001 --timeout 120000
+
+      - name: Run critical user journey tests
+        run: npx playwright test critical-user-journeys.spec.ts cross-browser-compatibility.spec.ts
+        working-directory: apps/web
+        env:
+          CI: true
+
+      - name: Upload journey test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: critical-journeys-report
+          path: apps/web/playwright-report/
+          retention-days: 7
+
+  # AC5 & AC6: Authentication and Error Scenario Testing
+  security-error-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps
+
+      - name: Build application
+        run: npx turbo run build
+
+      - name: Start development server
+        run: npm run dev &
+        working-directory: apps/web
+
+      - name: Wait for server to be ready
+        run: npx wait-on http://localhost:3001 --timeout 120000
+
+      - name: Run authentication and error scenario tests
+        run: npx playwright test authentication-authorization.spec.ts error-scenario-testing.spec.ts
+        working-directory: apps/web
+        env:
+          CI: true
+
+      - name: Upload security test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: security-error-report
+          path: apps/web/playwright-report/
+          retention-days: 15
+
+  # Full comprehensive test suite (runs on schedule)
+  comprehensive-tests:
+    if: github.event_name == 'schedule' || contains(github.event.head_commit.message, '[full-e2e]')
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.x'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps
+
+      - name: Build application
+        run: npx turbo run build
+
+      - name: Start development server
+        run: npm run dev &
+        working-directory: apps/web
+
+      - name: Wait for server to be ready
+        run: npx wait-on http://localhost:3001 --timeout 120000
+
+      - name: Run comprehensive test suite
+        run: npm run e2e:full
+        working-directory: apps/web
+        env:
+          CI: true
+
+      - name: Upload comprehensive results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: comprehensive-e2e-report
+          path: apps/web/playwright-report/
+          retention-days: 30
+
+      - name: Upload all screenshots
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: comprehensive-screenshots
+          path: apps/web/e2e/screenshots/
+          retention-days: 15
+
+      - name: Create comprehensive test report
+        uses: actions/github-script@v7
+        if: always()
+        with:
+          script: |
+            const fs = require('fs');
+            const path = 'apps/web/playwright-report/results.json';
+            
+            if (fs.existsSync(path)) {
+              const results = JSON.parse(fs.readFileSync(path, 'utf8'));
+              
+              // Generate comprehensive report
+              let reportBody = '# 🧪 Comprehensive E2E Test Report\n\n';
+              reportBody += `**Execution Date**: ${new Date().toISOString().split('T')[0]}\n`;
+              reportBody += `**Commit**: ${process.env.GITHUB_SHA?.substring(0, 7)}\n\n`;
+              
+              if (results.suites) {
+                results.suites.forEach(suite => {
+                  const passed = suite.specs.filter(spec => spec.ok).length;
+                  const total = suite.specs.length;
+                  const rate = total > 0 ? ((passed / total) * 100).toFixed(1) : '0';
+                  
+                  reportBody += `## ${suite.title}\n`;
+                  reportBody += `**Success Rate**: ${rate}% (${passed}/${total})\n\n`;
+                  
+                  if (passed !== total) {
+                    const failed = suite.specs.filter(spec => !spec.ok);
+                    reportBody += '**Failed Tests**:\n';
+                    failed.forEach(spec => {
+                      reportBody += `- ❌ ${spec.title}\n`;
+                    });
+                    reportBody += '\n';
+                  }
+                });
+              }
+              
+              reportBody += '\n[View detailed report](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})';
+              
+              // Create issue with comprehensive report
+              github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: `E2E Test Report - ${new Date().toISOString().split('T')[0]}`,
+                body: reportBody,
+                labels: ['e2e-report', 'testing']
+              });
+            }
+
+  # Test result summary
+  test-summary:
+    needs: [cross-browser-tests, responsive-tests, performance-tests, accessibility-tests, critical-journeys, security-error-tests]
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Create test summary
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const jobs = [
+              { name: 'Cross-Browser Tests', status: '${{ needs.cross-browser-tests.result }}' },
+              { name: 'Responsive Tests', status: '${{ needs.responsive-tests.result }}' },
+              { name: 'Performance Tests', status: '${{ needs.performance-tests.result }}' },
+              { name: 'Accessibility Tests', status: '${{ needs.accessibility-tests.result }}' },
+              { name: 'Critical Journeys', status: '${{ needs.critical-journeys.result }}' },
+              { name: 'Security & Error Tests', status: '${{ needs.security-error-tests.result }}' }
+            ];
+            
+            let summaryBody = '# 🧪 E2E Test Suite Summary\n\n';
+            summaryBody += '| Test Category | Status |\n|---------------|--------|\n';
+            
+            jobs.forEach(job => {
+              const icon = job.status === 'success' ? '✅' : 
+                          job.status === 'failure' ? '❌' : 
+                          job.status === 'skipped' ? '⏭️' : '⚠️';
+              summaryBody += `| ${job.name} | ${icon} ${job.status} |\n`;
+            });
+            
+            const allPassed = jobs.every(job => job.status === 'success');
+            
+            summaryBody += `\n## Overall Status: ${allPassed ? '✅ PASS' : '❌ FAIL'}\n\n`;
+            
+            if (!allPassed) {
+              summaryBody += '**Action Required**: Please review failed test categories and address issues before merging.\n\n';
+            }
+            
+            summaryBody += `**Workflow Run**: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}\n`;
+            
+            if (context.payload.pull_request) {
+              github.rest.issues.createComment({
+                issue_number: context.payload.pull_request.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: summaryBody
               });
             }
