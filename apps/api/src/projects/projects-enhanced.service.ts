@@ -1,379 +1,338 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import { Injectable, NotFoundException, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { CacheInvalidationService, CacheInvalidationEvent } from '../scheduling/services/cache-invalidation.service';
-import { BatchScheduleUpdateService, BatchUpdateRequest } from '../scheduling/services/batch-schedule-update.service';
 
-// AC3: Enhanced project service with sub-200ms performance optimizations
 @Injectable()
 export class ProjectsEnhancedService {
-  constructor(
-    private prisma: PrismaService,
-    private cacheInvalidationService: CacheInvalidationService,
-    private batchUpdateService: BatchScheduleUpdateService
-  ) {}
+  private readonly logger = new Logger(ProjectsEnhancedService.name);
 
-  // AC3: Optimized Gantt schedule data retrieval with aggressive caching and query optimization
-  async getOptimizedGanttSchedule(
-    projectId: string,
-    options: { 
+  constructor(private prisma: PrismaService) {}
+
+  /**
+   * Get enhanced project data with computed schedule
+   */
+  async getEnhancedProjectData(
+    projectId: string, 
+    options: {
+      algorithm?: 'cpm' | 'pert' | 'hybrid';
       includeHistory?: boolean;
-      useCache?: boolean;
-      cacheStrategy?: 'aggressive' | 'conservative';
+      depth?: number;
     } = {}
   ) {
+    const {
+      algorithm = 'hybrid',
+      includeHistory = false,
+      depth = 3
+    } = options;
+
     const startTime = Date.now();
-    const { includeHistory = false, useCache = true, cacheStrategy = 'aggressive' } = options;
 
-    try {
-      // Check cache first if enabled
-      if (useCache) {
-        const cachedResult = await this.getCachedScheduleData(projectId, includeHistory);
-        if (cachedResult) {
-          return {
-            ...cachedResult,
-            performance: {
-              ...cachedResult.performance,
-              cacheHit: true,
-              totalResponseTime: Date.now() - startTime
-            }
-          };
-        }
-      }
-
-      // Optimized single query to get all schedule data with pre-calculated values
-      const scheduleData = await this.prisma.$queryRaw`
-        WITH latest_schedule AS (
-          SELECT DISTINCT ON (csv.project_id)
-            csv.computed_schedule_id,
-            csv.calculated_at,
-            csv.algorithm,
-            csv.computed_end_date as project_end_date,
-            csv.total_duration,
-            csv.critical_path
-          FROM computed_schedule_view csv
-          WHERE csv.project_id = ${projectId}::uuid
-          ORDER BY csv.project_id, csv.calculated_at DESC
-        ),
-        schedule_tasks AS (
-          SELECT 
-            csv.task_id,
-            csv.task_title,
-            csv.assignee_id,
-            csv.task_status,
-            csv.progress,
-            csv.earliest_start_date,
-            csv.earliest_finish_date,
-            csv.latest_start_date,
-            csv.latest_finish_date,
-            -- Optimized float calculation (convert minutes to days with precision)
-            ROUND((csv.total_float / 1440.0)::numeric, 3) as total_float_days,
-            csv.critical_path,
-            csv.risk_level,
-            csv.estimate_value,
-            csv.estimate_unit
-          FROM computed_schedule_view csv
-          INNER JOIN latest_schedule ls ON csv.computed_schedule_id = ls.computed_schedule_id
-          ORDER BY csv.earliest_start_date ASC, csv.critical_path DESC
-        )
+    // Enhanced query with performance optimizations
+    const scheduleQuery = `
+      WITH latest_schedule AS (
         SELECT 
-          ls.*,
-          -- Aggregate all tasks into single JSON for minimal data transfer
-          jsonb_build_object(
+          cs.id as schedule_id,
+          cs.calculated_at,
+          cs.algorithm,
+          cs.computed_end_date,
+          cs.total_duration,
+          cs.critical_path,
+          JSON_OBJECT(
+            'scheduleId', cs.id,
+            'calculatedAt', cs.calculated_at,
+            'algorithm', cs.algorithm,
+            'projectEndDate', cs.computed_end_date,
+            'totalDuration', cs.total_duration,
+            'criticalPath', JSON_EXTRACT(cs.critical_path, '$'),
             'tasks', (
-              SELECT jsonb_agg(
-                jsonb_build_object(
-                  'taskId', st.task_id,
-                  'title', st.task_title,
-                  'assigneeId', st.assignee_id,
-                  'status', st.task_status,
-                  'progress', st.progress,
-                  'earliestStartDate', st.earliest_start_date,
-                  'earliestFinishDate', st.earliest_finish_date,
-                  'latestStartDate', st.latest_start_date,
-                  'latestFinishDate', st.latest_finish_date,
-                  'totalFloat', st.total_float_days,
-                  'criticalPath', st.critical_path,
-                  'riskLevel', st.risk_level,
-                  'estimateValue', st.estimate_value,
-                  'estimateUnit', st.estimate_unit
+              SELECT JSON_ARRAYAGG(
+                JSON_OBJECT(
+                  'id', i.id,
+                  'title', i.title,
+                  'wbsCode', i.wbs_code,
+                  'estimatedHours', i.estimated_hours,
+                  'startDate', i.start_date,
+                  'dueDate', i.due_date,
+                  'status', i.status,
+                  'priority', i.priority,
+                  'parentId', i.parent_id
                 )
-              ) FROM schedule_tasks st
-            ),
-            'summary', jsonb_build_object(
-              'totalTasks', (SELECT COUNT(*) FROM schedule_tasks),
-              'criticalTasks', (SELECT COUNT(*) FROM schedule_tasks WHERE critical_path = true),
-              'nearCriticalTasks', (SELECT COUNT(*) FROM schedule_tasks WHERE risk_level = 'near_critical'),
-              'avgFloatTime', (
-                SELECT ROUND(AVG(total_float_days)::numeric, 2) 
-                FROM schedule_tasks 
-                WHERE critical_path = false
               )
+              FROM Issue i 
+              WHERE i.project_id = cs.project_id
+              ORDER BY i.wbs_code
+              LIMIT ?
+            ),
+            'dependencies', (
+              SELECT JSON_ARRAYAGG(
+                JSON_OBJECT(
+                  'id', d.id,
+                  'predecessorId', d.predecessor_id,
+                  'successorId', d.successor_id,
+                  'type', d.type,
+                  'lag', d.lag
+                )
+              )
+              FROM Dependency d
+              WHERE d.project_id = cs.project_id
             )
           ) as schedule_data
-        FROM latest_schedule ls;
+        FROM ComputedSchedule cs 
+        WHERE cs.project_id = ?
+          AND cs.algorithm = ?
+        ORDER BY cs.calculated_at DESC
+        LIMIT 1
+      )
+      SELECT 
+        schedule_id,
+        calculated_at,
+        algorithm,
+        computed_end_date,
+        total_duration,
+        critical_path,
+        schedule_data
+      FROM latest_schedule;
+    `;
+
+    const scheduleData = await this.prisma.$queryRawUnsafe(
+      scheduleQuery, 
+      depth * 100, // Task limit based on depth
+      projectId, 
+      algorithm
+    ) as any[];
+
+    const queryTime = Date.now() - startTime;
+
+    // Type guard for scheduleData
+    if (!Array.isArray(scheduleData) || scheduleData.length === 0) {
+      throw new NotFoundException('No computed schedule found for this project');
+    }
+
+    const schedule = scheduleData[0];
+    const scheduleDataObj = schedule.schedule_data as any;
+
+    let history = [];
+    if (includeHistory) {
+      const historyQuery = `
+        SELECT 
+          id, calculated_at, algorithm, total_duration, computed_end_date
+        FROM ComputedSchedule 
+        WHERE project_id = ? 
+        ORDER BY calculated_at DESC 
+        LIMIT 10;
       `;
-
-      const queryTime = Date.now() - startTime;
-
-      if (!scheduleData || scheduleData.length === 0) {
-        throw new NotFoundException('No computed schedule found for this project');
-      }
-
-      const schedule = scheduleData[0];
-      const scheduleDataObj = schedule.schedule_data as any;
-
-      // Include historical data only if explicitly requested to minimize response size
-      let history = null;
-      if (includeHistory) {
-        history = await this.getScheduleHistory(projectId, 5); // Limit to 5 most recent
-      }
-
-      const responseTime = Date.now() - startTime;
-      const result = {
-        schedule: {
-          computedScheduleId: schedule.computed_schedule_id,
-          calculatedAt: schedule.calculated_at,
-          algorithm: schedule.algorithm,
-          projectEndDate: schedule.project_end_date,
-          totalDuration: schedule.total_duration,
-          criticalPath: schedule.critical_path,
-          tasks: scheduleDataObj.tasks || [],
-          summary: scheduleDataObj.summary || {}
-        },
-        history,
-        performance: {
-          queryTime,
-          responseTime,
-          taskCount: scheduleDataObj.tasks?.length || 0,
-          cacheHit: false
-        },
-        cacheStatus: responseTime < 200 ? 'optimal' : 'slow'
-      };
-
-      // Cache result if performance is good and caching is enabled
-      if (useCache && responseTime < 300) { // Cache if under 300ms
-        await this.cacheScheduleData(projectId, result, cacheStrategy);
-      }
-
-      return result;
-
-    } catch (error) {
-      if (error instanceof NotFoundException) {
-        throw error;
-      }
-      throw new BadRequestException(`Failed to retrieve schedule data: ${error.message}`);
+      history = await this.prisma.$queryRawUnsafe(historyQuery, projectId) as any[];
     }
-  }
 
-  // AC4: Batch update operations with optimized performance
-  async executeBatchScheduleUpdate(
-    projectId: string,
-    updates: any[],
-    options: {
-      conflictResolution?: 'fail' | 'skip' | 'overwrite';
-      validateConstraints?: boolean;
-      invalidateCache?: boolean;
-    } = {}
-  ) {
-    const batchRequest: BatchUpdateRequest = {
-      projectId,
-      updates,
-      options: {
-        conflictResolution: options.conflictResolution || 'fail',
-        validateConstraints: options.validateConstraints ?? true,
-        refreshMaterializedView: true
+    const responseTime = Date.now() - startTime;
+
+    return {
+      schedule: scheduleDataObj,
+      history,
+      performance: {
+        queryTime,
+        responseTime,
+        taskCount: scheduleDataObj?.tasks?.length || 0,
+        dependencyCount: scheduleDataObj?.dependencies?.length || 0
+      },
+      cacheStatus: 'computed',
+      metadata: {
+        algorithm,
+        depth,
+        includeHistory,
+        timestamp: new Date()
       }
     };
-
-    const result = await this.batchUpdateService.executeBatchUpdate(batchRequest);
-
-    // Invalidate cache if updates were successful
-    if (result.successfulUpdates > 0 && options.invalidateCache !== false) {
-      const invalidationEvent: CacheInvalidationEvent = {
-        projectId,
-        entityType: 'issue',
-        operation: 'bulk_update',
-        timestamp: new Date(),
-        metadata: {
-          updatedCount: result.successfulUpdates,
-          scheduleAffecting: true
-        }
-      };
-
-      await this.cacheInvalidationService.invalidateCache(invalidationEvent, {
-        strategy: result.successfulUpdates > 10 ? 'batched' : 'immediate',
-        priority: 'normal'
-      });
-    }
-
-    return result;
   }
 
-  // AC5: Schedule versioning integration
-  async createScheduleVersion(
-    projectId: string,
-    versionType: string,
-    createdBy: string,
-    changes: any,
-    computedScheduleId?: string
-  ) {
-    const versionId = await this.prisma.$queryRaw`
-      SELECT create_schedule_version(
-        ${projectId}::uuid,
-        ${versionType}::varchar,
-        ${createdBy}::uuid,
-        ${computedScheduleId || null}::uuid,
-        ${JSON.stringify(changes.summary || {})}::jsonb,
-        ${JSON.stringify(changes.dependencies || [])}::jsonb,
-        ${JSON.stringify(changes.tasks || [])}::jsonb,
-        ${JSON.stringify(changes.algorithm || {})}::jsonb,
-        ${changes.duration || null}::int
-      ) as version_id
-    `;
-
-    return versionId[0]?.version_id;
-  }
-
-  async getScheduleVersionHistory(projectId: string, limit: number = 10) {
-    return await this.prisma.$queryRaw`
+  /**
+   * Get project statistics with performance metrics
+   */
+  async getProjectStatistics(projectId: string) {
+    const stats = await this.prisma.$queryRaw`
       SELECT 
-        sv.id,
-        sv.version_number,
-        sv.version_type,
-        sv.created_at,
-        sv.created_by,
-        sv.is_applied,
-        sv.applied_at,
-        sv.changes_summary,
-        sv.calculation_duration_ms,
-        u.name as created_by_name
-      FROM schedule_versions sv
-      LEFT JOIN users u ON sv.created_by = u.id
-      WHERE sv.project_id = ${projectId}::uuid
-      ORDER BY sv.version_number DESC
-      LIMIT ${limit}
-    `;
-  }
+        (SELECT COUNT(*) FROM Issue WHERE project_id = ${projectId}) as total_issues,
+        (SELECT COUNT(*) FROM Issue WHERE project_id = ${projectId} AND status = 'done') as completed_issues,
+        (SELECT COUNT(*) FROM Dependency WHERE project_id = ${projectId}) as total_dependencies,
+        (SELECT SUM(estimated_hours) FROM Issue WHERE project_id = ${projectId}) as total_estimated_hours,
+        (SELECT SUM(actual_hours) FROM Issue WHERE project_id = ${projectId}) as total_actual_hours,
+        (SELECT COUNT(DISTINCT assignee_id) FROM Issue WHERE project_id = ${projectId} AND assignee_id IS NOT NULL) as team_size
+    ` as any[];
 
-  // Private helper methods for caching
-
-  private async getCachedScheduleData(
-    projectId: string,
-    includeHistory: boolean
-  ): Promise<any | null> {
-    try {
-      // This would integrate with your caching system (Redis, etc.)
-      // For now, return null to indicate no cache hit
-      return null;
-    } catch (error) {
-      // Cache miss or error - proceed with database query
-      return null;
-    }
-  }
-
-  private async cacheScheduleData(
-    projectId: string,
-    data: any,
-    strategy: 'aggressive' | 'conservative'
-  ): Promise<void> {
-    try {
-      const ttl = strategy === 'aggressive' ? 300 : 60; // 5 min vs 1 min TTL
-      const cacheKey = `gantt:${projectId}:${data.schedule.calculatedAt}`;
-      
-      // This would integrate with your caching system
-      // Example: await redis.setex(cacheKey, ttl, JSON.stringify(data));
-      
-    } catch (error) {
-      // Cache write failure - log but don't fail the request
-      console.warn(`Failed to cache schedule data for project ${projectId}:`, error);
-    }
-  }
-
-  private async getScheduleHistory(projectId: string, limit: number) {
-    return await this.prisma.$queryRaw`
-      SELECT 
-        cs.id,
-        cs.calculated_at,
-        cs.algorithm,
-        cs.applied,
-        cs.applied_at,
-        cs.total_duration,
-        COUNT(tsh.task_id) as task_count,
-        -- Performance summary
-        jsonb_build_object(
-          'criticalPathLength', jsonb_array_length(cs.critical_path),
-          'hasConflicts', CASE WHEN jsonb_array_length(cs.conflicts) > 0 THEN true ELSE false END
-        ) as summary
-      FROM computed_schedules cs
-      LEFT JOIN task_schedule_history tsh ON cs.id = tsh.computed_schedule_id
-      WHERE cs.project_id = ${projectId}::uuid
-      GROUP BY cs.id, cs.calculated_at, cs.algorithm, cs.applied, cs.applied_at, cs.total_duration, cs.critical_path, cs.conflicts
-      ORDER BY cs.calculated_at DESC
-      LIMIT ${limit}
-    `;
-  }
-
-  // AC7: Intelligent cache invalidation on data changes
-  async invalidateProjectCache(
-    projectId: string,
-    changeType: 'dependency' | 'schedule' | 'task' | 'bulk',
-    entityId?: string,
-    metadata?: any
-  ) {
-    const invalidationEvent: CacheInvalidationEvent = {
-      projectId,
-      entityType: changeType === 'task' ? 'issue' : changeType as any,
-      entityId,
-      operation: 'update',
-      timestamp: new Date(),
-      metadata
+    return stats[0] || {
+      total_issues: 0,
+      completed_issues: 0,
+      total_dependencies: 0,
+      total_estimated_hours: 0,
+      total_actual_hours: 0,
+      team_size: 0
     };
+  }
 
-    // Choose invalidation strategy based on change impact
-    let strategy: 'immediate' | 'batched' | 'scheduled' = 'immediate';
-    let priority: 'low' | 'normal' | 'high' | 'critical' = 'normal';
+  /**
+   * Calculate project health score
+   */
+  async calculateProjectHealth(projectId: string) {
+    const stats = await this.getProjectStatistics(projectId);
+    
+    const completionRate = stats.total_issues > 0 
+      ? (stats.completed_issues / stats.total_issues) * 100 
+      : 0;
+    
+    const estimateAccuracy = stats.total_estimated_hours > 0 
+      ? Math.min(100, (stats.total_estimated_hours / Math.max(stats.total_actual_hours, 1)) * 100)
+      : 100;
 
-    if (changeType === 'dependency') {
-      strategy = 'immediate';
-      priority = 'high'; // Dependencies affect critical path
-    } else if (changeType === 'bulk') {
-      strategy = 'batched';
-      priority = 'normal';
-    } else if (metadata?.scheduleAffecting === false) {
-      strategy = 'scheduled';
-      priority = 'low';
-    }
+    const teamUtilization = stats.total_issues > 0 && stats.team_size > 0
+      ? (stats.total_issues / stats.team_size)
+      : 0;
 
-    return await this.cacheInvalidationService.invalidateCache(
-      invalidationEvent,
-      { strategy, priority }
+    // Health score calculation (0-100)
+    const healthScore = Math.round(
+      (completionRate * 0.4) + 
+      (estimateAccuracy * 0.3) + 
+      (Math.min(100, teamUtilization * 10) * 0.3)
     );
+
+    return {
+      healthScore,
+      metrics: {
+        completionRate: Math.round(completionRate),
+        estimateAccuracy: Math.round(estimateAccuracy),
+        teamUtilization: Math.round(teamUtilization),
+        totalIssues: stats.total_issues,
+        completedIssues: stats.completed_issues,
+        totalDependencies: stats.total_dependencies,
+        teamSize: stats.team_size
+      }
+    };
   }
 
-  // AC6: Zero-downtime migration support
-  async getMigrationStatus(): Promise<any> {
-    return await this.prisma.$queryRaw`
-      SELECT 
-        migration_name,
-        phase,
-        started_at,
-        progress_percentage,
-        success,
-        error_message
-      FROM schema_migration_control
-      WHERE phase != 'completed'
-      ORDER BY started_at DESC
-      LIMIT 5
-    `;
+  /**
+   * Get project Gantt chart data
+   */
+  async getProjectGanttData(projectId: string, options: any = {}) {
+    try {
+      const project = await this.prisma.project.findUnique({
+        where: { id: projectId },
+        include: {
+          issues: {
+            include: {
+              assignee: {
+                select: {
+                  id: true,
+                  name: true,
+                  email: true
+                }
+              }
+            },
+            orderBy: [
+              { parentIssueId: { sort: 'asc', nulls: 'first' } },
+              { orderIndex: 'asc' }
+            ]
+          }
+        }
+      });
+
+      if (!project) {
+        throw new NotFoundException('Project not found');
+      }
+
+      const tasks = project.issues.map((issue, index) => ({
+        id: issue.id,
+        title: issue.title,
+        description: issue.description,
+        parentId: issue.parentIssueId,
+        startDate: issue.startDate?.toISOString() || new Date().toISOString(),
+        endDate: issue.dueDate?.toISOString() || new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
+        progress: issue.progress,
+        status: issue.status,
+        assigneeId: issue.assigneeId,
+        assigneeName: issue.assignee?.name,
+        estimatedHours: issue.estimateValue,
+        actualHours: issue.spent,
+        level: this.calculateIssueLevel(issue, project.issues),
+        order: index,
+        color: this.getStatusColor(issue.status)
+      }));
+
+      const dependencies = await this.prisma.dependency.findMany({
+        where: {
+          projectId: projectId,
+          predecessorId: {
+            in: project.issues.map(i => i.id)
+          },
+          successorId: {
+            in: project.issues.map(i => i.id)
+          }
+        }
+      }).then(deps => deps.map(dep => ({
+        id: dep.id,
+        predecessorId: dep.predecessorId,
+        successorId: dep.successorId,
+        type: dep.type as 'FS' | 'SS' | 'FF' | 'SF',
+        lag: dep.lag,
+        lagUnit: 'hours' as 'days' | 'hours'
+      })));
+
+      const projectStartDate = this.getProjectStartDate(tasks);
+      const projectEndDate = this.getProjectEndDate(tasks);
+
+      return {
+        tasks,
+        dependencies,
+        projectStartDate: projectStartDate.toISOString(),
+        projectEndDate: projectEndDate.toISOString(),
+        totalTasks: tasks.length,
+        generatedAt: new Date().toISOString()
+      };
+    } catch (error) {
+      this.logger.error(`Failed to get Gantt data for project ${projectId}:`, error);
+      throw error;
+    }
   }
 
-  async triggerZeroDowntimeMigration(migrationName: string, migrationData: any) {
-    return await this.prisma.$queryRaw`
-      SELECT manage_migration_phase(
-        ${migrationName}::varchar,
-        'preparing'::varchar,
-        ${JSON.stringify(migrationData)}::jsonb
-      ) as result
-    `;
+  private calculateIssueLevel(issue: any, allIssues: any[]): number {
+    let level = 0;
+    let currentParentId = issue.parentIssueId;
+    
+    while (currentParentId) {
+      const parent = allIssues.find(i => i.id === currentParentId);
+      if (!parent) break;
+      level++;
+      currentParentId = parent.parentIssueId;
+    }
+    
+    return level;
+  }
+
+  private getStatusColor(status: string): string {
+    const colors = {
+      'todo': '#6b7280',
+      'doing': '#3b82f6',
+      'blocked': '#ef4444',
+      'review': '#f59e0b',
+      'done': '#10b981'
+    };
+    return colors[status] || '#6b7280';
+  }
+
+  private getProjectStartDate(tasks: any[]): Date {
+    const dates = tasks
+      .map(task => new Date(task.startDate))
+      .filter(date => !isNaN(date.getTime()));
+    
+    return dates.length > 0 
+      ? new Date(Math.min(...dates.map(d => d.getTime())))
+      : new Date();
+  }
+
+  private getProjectEndDate(tasks: any[]): Date {
+    const dates = tasks
+      .map(task => new Date(task.endDate))
+      .filter(date => !isNaN(date.getTime()));
+    
+    return dates.length > 0 
+      ? new Date(Math.max(...dates.map(d => d.getTime())))
+      : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
   }
 }
