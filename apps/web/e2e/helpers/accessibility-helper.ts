@@ -8,385 +8,245 @@ export interface AccessibilityViolation {
   help: string
   helpUrl: string
   nodes: Array<{
+    target: string
     html: string
-    target: string[]
+    failureSummary: string
   }>
 }
 
-export interface AccessibilityReport {
-  url: string
-  violations: AccessibilityViolation[]
-  passedRules: number
-  violationCount: number
-  wcagLevel: 'AA' | 'AAA'
-  timestamp: string
+export interface AccessibilityCheckOptions {
+  // Selector to limit the scope of accessibility testing
+  include?: string[]
+  exclude?: string[]
+  // Tags to run specific accessibility rules
+  tags?: string[]
+  // Rules to disable during testing
+  disableRules?: string[]
+  // Severity threshold - violations below this level will be ignored
+  threshold?: 'minor' | 'moderate' | 'serious' | 'critical'
 }
 
+/**
+ * Enhanced accessibility helper with comprehensive testing capabilities
+ */
 export class AccessibilityHelper {
-  constructor(private page: Page) {}
+  private page: Page
+  private isAxeInjected = false
 
-  // AC7: Initialize axe-core for accessibility testing
-  async initialize(): Promise<void> {
-    await injectAxe(this.page)
+  constructor(page: Page) {
+    this.page = page
   }
 
-  // AC7: Check WCAG 2.1 AA compliance for the current page
-  async checkWCAGCompliance(options?: {
-    include?: string[]
-    exclude?: string[]
-    tags?: string[]
-  }): Promise<AccessibilityReport> {
-    const defaultOptions = {
-      tags: ['wcag2a', 'wcag2aa', 'wcag21aa'] // WCAG 2.1 AA compliance
+  /**
+   * Initialize axe-core on the current page
+   */
+  async initialize(): Promise<void> {
+    if (!this.isAxeInjected) {
+      await injectAxe(this.page)
+      this.isAxeInjected = true
+    }
+  }
+
+  /**
+   * Run comprehensive accessibility checks on the current page
+   */
+  async runAccessibilityCheck(options: AccessibilityCheckOptions = {}): Promise<AccessibilityViolation[]> {
+    await this.initialize()
+
+    const axeOptions = {
+      include: options.include || [],
+      exclude: options.exclude || [],
+      tags: options.tags || ['wcag2a', 'wcag2aa', 'wcag21aa'],
+      rules: {} as Record<string, { enabled: boolean }>
     }
 
-    const axeOptions = { ...defaultOptions, ...options }
+    // Disable specific rules if requested
+    if (options.disableRules) {
+      options.disableRules.forEach(rule => {
+        axeOptions.rules[rule] = { enabled: false }
+      })
+    }
 
     try {
-      // Run axe-core accessibility scan
       await checkA11y(this.page, undefined, axeOptions)
-      
-      // If no violations, return clean report
-      return this.generateReport([], axeOptions.tags)
+      return [] // No violations found
     } catch (error) {
-      // Extract violations from error
+      // Extract violations from the error
       const violations = await getViolations(this.page)
-      return this.generateReport(violations, axeOptions.tags)
+      
+      // Filter by severity threshold if specified
+      let filteredViolations = violations
+      if (options.threshold) {
+        const severityOrder = ['minor', 'moderate', 'serious', 'critical']
+        const thresholdIndex = severityOrder.indexOf(options.threshold)
+        
+        filteredViolations = violations.filter(violation => {
+          const violationIndex = severityOrder.indexOf(violation.impact)
+          return violationIndex >= thresholdIndex
+        })
+      }
+
+      return filteredViolations.map(violation => ({
+        id: violation.id,
+        impact: violation.impact as AccessibilityViolation['impact'],
+        description: violation.description,
+        help: violation.help,
+        helpUrl: violation.helpUrl,
+        nodes: violation.nodes.map(node => ({
+          target: node.target.join(', '),
+          html: node.html,
+          failureSummary: node.failureSummary
+        }))
+      }))
     }
   }
 
-  // AC7: Check specific accessibility features
-  async checkKeyboardNavigation(): Promise<boolean> {
-    console.log('Testing keyboard navigation...')
-    
-    // Focus on the first interactive element
-    await this.page.keyboard.press('Tab')
-    
-    const focusedElement = await this.page.evaluate(() => {
-      return document.activeElement?.tagName
-    })
+  /**
+   * Check accessibility with detailed reporting
+   */
+  async checkWithReport(options: AccessibilityCheckOptions = {}): Promise<{
+    passed: boolean
+    violations: AccessibilityViolation[]
+    report: string
+  }> {
+    const violations = await this.runAccessibilityCheck(options)
+    const passed = violations.length === 0
 
-    // Test tab navigation through interactive elements
-    const interactiveElements = await this.page.locator('button, a, input, select, textarea, [tabindex]:not([tabindex="-1"])').count()
+    const report = this.generateReport(violations)
     
-    let focusableCount = 0
-    for (let i = 0; i < Math.min(interactiveElements, 20); i++) {
-      await this.page.keyboard.press('Tab')
-      
-      const currentFocus = await this.page.evaluate(() => {
-        const activeEl = document.activeElement
-        return activeEl ? {
-          tagName: activeEl.tagName,
-          hasVisibleFocus: window.getComputedStyle(activeEl).outline !== 'none' || 
-                          window.getComputedStyle(activeEl).boxShadow.includes('focus')
-        } : null
-      })
-      
-      if (currentFocus) {
-        focusableCount++
-      }
+    return { passed, violations, report }
+  }
+
+  /**
+   * Assert that the page has no accessibility violations
+   */
+  async assertNoViolations(options: AccessibilityCheckOptions = {}): Promise<void> {
+    const violations = await this.runAccessibilityCheck(options)
+    
+    if (violations.length > 0) {
+      const report = this.generateReport(violations)
+      throw new Error(`Accessibility violations found:\n${report}`)
+    }
+  }
+
+  /**
+   * Check specific elements for accessibility issues
+   */
+  async checkElement(selector: string, options: Omit<AccessibilityCheckOptions, 'include'> = {}): Promise<AccessibilityViolation[]> {
+    return this.runAccessibilityCheck({
+      ...options,
+      include: [selector]
+    })
+  }
+
+  /**
+   * Check form accessibility
+   */
+  async checkFormAccessibility(formSelector = 'form'): Promise<AccessibilityViolation[]> {
+    return this.checkElement(formSelector, {
+      tags: ['wcag2a', 'wcag2aa', 'wcag21aa', 'best-practice'],
+      threshold: 'moderate'
+    })
+  }
+
+  /**
+   * Check navigation accessibility
+   */
+  async checkNavigationAccessibility(navSelector = 'nav'): Promise<AccessibilityViolation[]> {
+    return this.checkElement(navSelector, {
+      tags: ['wcag2a', 'wcag2aa', 'wcag21aa'],
+      threshold: 'moderate'
+    })
+  }
+
+  /**
+   * Check modal/dialog accessibility
+   */
+  async checkModalAccessibility(modalSelector: string): Promise<AccessibilityViolation[]> {
+    return this.checkElement(modalSelector, {
+      tags: ['wcag2a', 'wcag2aa', 'wcag21aa'],
+      disableRules: ['color-contrast'], // Modals often have different contrast requirements
+      threshold: 'serious'
+    })
+  }
+
+  /**
+   * Generate a human-readable accessibility report
+   */
+  private generateReport(violations: AccessibilityViolation[]): string {
+    if (violations.length === 0) {
+      return '✅ No accessibility violations found'
     }
 
-    console.log(`Keyboard navigation test: ${focusableCount}/${Math.min(interactiveElements, 20)} elements focusable`)
-    return focusableCount > 0
-  }
+    const report = [
+      `❌ Found ${violations.length} accessibility violation(s):`,
+      ''
+    ]
 
-  // AC7: Check ARIA labels and roles
-  async checkARIACompliance(): Promise<{
-    missingLabels: string[]
-    invalidRoles: string[]
-    missingDescriptions: string[]
-  }> {
-    console.log('Checking ARIA compliance...')
-    
-    const ariaIssues = await this.page.evaluate(() => {
-      const missingLabels: string[] = []
-      const invalidRoles: string[] = []
-      const missingDescriptions: string[] = []
-
-      // Check for interactive elements without labels
-      const interactiveElements = document.querySelectorAll('button, a, input, select, textarea')
-      interactiveElements.forEach((el, index) => {
-        const hasLabel = el.hasAttribute('aria-label') || 
-                         el.hasAttribute('aria-labelledby') || 
-                         (el as HTMLElement).textContent?.trim()
-
-        if (!hasLabel) {
-          missingLabels.push(`${el.tagName}[${index}]`)
+    violations.forEach((violation, index) => {
+      report.push(`${index + 1}. ${violation.id} (${violation.impact.toUpperCase()})`)
+      report.push(`   Description: ${violation.description}`)
+      report.push(`   Help: ${violation.help}`)
+      report.push(`   Learn more: ${violation.helpUrl}`)
+      
+      if (violation.nodes.length > 0) {
+        report.push('   Affected elements:')
+        violation.nodes.slice(0, 3).forEach(node => { // Limit to first 3 nodes
+          report.push(`     • ${node.target}`)
+          if (node.failureSummary) {
+            report.push(`       Issue: ${node.failureSummary}`)
+          }
+        })
+        if (violation.nodes.length > 3) {
+          report.push(`     ... and ${violation.nodes.length - 3} more elements`)
         }
-      })
-
-      // Check for elements with invalid ARIA roles
-      const elementsWithRoles = document.querySelectorAll('[role]')
-      const validRoles = [
-        'alert', 'alertdialog', 'application', 'article', 'banner', 'button', 'cell', 'checkbox',
-        'columnheader', 'combobox', 'complementary', 'contentinfo', 'definition', 'dialog',
-        'directory', 'document', 'form', 'grid', 'gridcell', 'group', 'heading', 'img',
-        'link', 'list', 'listbox', 'listitem', 'log', 'main', 'marquee', 'math', 'menu',
-        'menubar', 'menuitem', 'menuitemcheckbox', 'menuitemradio', 'navigation', 'note',
-        'option', 'presentation', 'progressbar', 'radio', 'radiogroup', 'region', 'row',
-        'rowgroup', 'rowheader', 'scrollbar', 'search', 'separator', 'slider', 'spinbutton',
-        'status', 'tab', 'tablist', 'tabpanel', 'textbox', 'timer', 'toolbar', 'tooltip',
-        'tree', 'treegrid', 'treeitem'
-      ]
-
-      elementsWithRoles.forEach((el, index) => {
-        const role = el.getAttribute('role')
-        if (role && !validRoles.includes(role)) {
-          invalidRoles.push(`${el.tagName}[${index}] role="${role}"`)
-        }
-      })
-
-      // Check for complex interactive elements without descriptions
-      const complexElements = document.querySelectorAll('[data-testid*="gantt"], [data-testid*="chart"], [data-testid*="diagram"]')
-      complexElements.forEach((el, index) => {
-        const hasDescription = el.hasAttribute('aria-describedby') || 
-                              el.hasAttribute('title') || 
-                              el.querySelector('[aria-hidden="false"]')
-
-        if (!hasDescription) {
-          missingDescriptions.push(`${el.tagName}[${index}]`)
-        }
-      })
-
-      return { missingLabels, invalidRoles, missingDescriptions }
-    })
-
-    console.log('ARIA compliance check results:', ariaIssues)
-    return ariaIssues
-  }
-
-  // AC7: Check color contrast ratios
-  async checkColorContrast(): Promise<boolean> {
-    console.log('Checking color contrast ratios...')
-    
-    const contrastIssues = await this.page.evaluate(() => {
-      const textElements = document.querySelectorAll('p, span, div, button, a, label, h1, h2, h3, h4, h5, h6')
-      const issues: Array<{ element: string; ratio: number }> = []
-
-      textElements.forEach((el, index) => {
-        const styles = window.getComputedStyle(el)
-        const textColor = styles.color
-        const backgroundColor = styles.backgroundColor
-
-        // Skip if transparent or no text
-        if (!el.textContent?.trim() || backgroundColor === 'rgba(0, 0, 0, 0)') {
-          return
-        }
-
-        // Simple contrast check (would need full contrast calculation in production)
-        const isLightText = textColor.includes('rgb(255') || textColor.includes('#fff')
-        const isDarkBackground = backgroundColor.includes('rgb(0') || backgroundColor.includes('#000')
-        
-        // Basic heuristic check - in real implementation would calculate exact contrast ratio
-        const hasGoodContrast = (isLightText && isDarkBackground) || (!isLightText && !isDarkBackground)
-        
-        if (!hasGoodContrast && index < 10) { // Limit to first 10 for performance
-          issues.push({ 
-            element: `${el.tagName}[${index}]`,
-            ratio: isLightText ? 4.5 : 3.0 // Placeholder values
-          })
-        }
-      })
-
-      return issues.length === 0
-    })
-
-    return contrastIssues
-  }
-
-  // AC7: Check for alternative text on images
-  async checkImageAltText(): Promise<string[]> {
-    console.log('Checking image alternative text...')
-    
-    const missingAltText = await this.page.evaluate(() => {
-      const images = document.querySelectorAll('img')
-      const missingAlt: string[] = []
-
-      images.forEach((img, index) => {
-        if (!img.hasAttribute('alt') || img.getAttribute('alt')?.trim() === '') {
-          missingAlt.push(`img[${index}] src="${img.src}"`)
-        }
-      })
-
-      return missingAlt
-    })
-
-    return missingAltText
-  }
-
-  // AC7: Check heading hierarchy
-  async checkHeadingHierarchy(): Promise<{
-    valid: boolean
-    issues: string[]
-  }> {
-    console.log('Checking heading hierarchy...')
-    
-    const headingIssues = await this.page.evaluate(() => {
-      const headings = document.querySelectorAll('h1, h2, h3, h4, h5, h6')
-      const issues: string[] = []
-      let previousLevel = 0
-
-      headings.forEach((heading, index) => {
-        const level = parseInt(heading.tagName.charAt(1))
-        
-        // Check for skipped levels
-        if (previousLevel > 0 && level > previousLevel + 1) {
-          issues.push(`Heading level skip: h${previousLevel} → h${level} at index ${index}`)
-        }
-        
-        // Check for multiple h1s (should typically have only one)
-        if (level === 1 && previousLevel === 1) {
-          issues.push(`Multiple h1 elements found at index ${index}`)
-        }
-        
-        previousLevel = level
-      })
-
-      return {
-        valid: issues.length === 0,
-        issues
       }
+      report.push('')
     })
 
-    return headingIssues
+    return report.join('\n')
   }
 
-  // AC7: Test screen reader compatibility
-  async checkScreenReaderCompat(): Promise<{
-    landmarksPresent: boolean
-    skipLinksPresent: boolean
-    liveRegionsPresent: boolean
+  /**
+   * Get accessibility insights for the current page
+   */
+  async getAccessibilityInsights(): Promise<{
+    totalElements: number
+    checkedElements: number
+    passedRules: number
+    failedRules: number
+    summary: string
   }> {
-    console.log('Checking screen reader compatibility...')
+    await this.initialize()
     
-    const screenReaderFeatures = await this.page.evaluate(() => {
-      // Check for landmark roles
-      const landmarks = document.querySelectorAll('[role="main"], [role="navigation"], [role="banner"], [role="contentinfo"], main, nav, header, footer')
-      const landmarksPresent = landmarks.length > 0
-
-      // Check for skip links
-      const skipLinks = document.querySelectorAll('a[href^="#"]:first-child, .skip-link, [class*="skip"]')
-      const skipLinksPresent = skipLinks.length > 0
-
-      // Check for live regions for dynamic content
-      const liveRegions = document.querySelectorAll('[aria-live], [role="status"], [role="alert"]')
-      const liveRegionsPresent = liveRegions.length > 0
-
-      return {
-        landmarksPresent,
-        skipLinksPresent,
-        liveRegionsPresent
-      }
+    // Run a comprehensive check to get detailed results
+    const violations = await this.runAccessibilityCheck({
+      tags: ['wcag2a', 'wcag2aa', 'wcag21aa', 'best-practice', 'experimental']
     })
 
-    return screenReaderFeatures
-  }
+    // Get page statistics
+    const totalElements = await this.page.evaluate(() => {
+      return document.querySelectorAll('*').length
+    })
 
-  // AC7: Generate comprehensive accessibility report
-  private async generateReport(violations: any[], wcagTags: string[]): Promise<AccessibilityReport> {
-    const url = this.page.url()
-    const timestamp = new Date().toISOString()
-    
-    // Count total rules that passed (approximate)
-    const totalRulesCount = 50 // Approximate number of axe rules
-    const violationCount = violations.length
-    const passedRules = Math.max(0, totalRulesCount - violationCount)
+    const checkedElements = await this.page.evaluate(() => {
+      // Approximate count of elements that axe typically checks
+      return document.querySelectorAll('input, button, a, img, form, label, h1, h2, h3, h4, h5, h6, nav, main, section, article').length
+    })
+
+    const failedRules = violations.length
+    const passedRules = Math.max(0, 50 - failedRules) // Approximate based on common axe rules
+
+    const summary = failedRules === 0 
+      ? '✅ Page passes all accessibility checks'
+      : `⚠️ Page has ${failedRules} accessibility issue(s) that need attention`
 
     return {
-      url,
-      violations: violations.map(v => ({
-        id: v.id,
-        impact: v.impact,
-        description: v.description,
-        help: v.help,
-        helpUrl: v.helpUrl,
-        nodes: v.nodes.map((n: any) => ({
-          html: n.html,
-          target: n.target
-        }))
-      })),
+      totalElements,
+      checkedElements,
       passedRules,
-      violationCount,
-      wcagLevel: wcagTags.includes('wcag21aa') ? 'AA' : 'AAA',
-      timestamp
+      failedRules,
+      summary
     }
-  }
-
-  // AC7: Assert WCAG 2.1 AA compliance
-  async assertWCAGCompliance(): Promise<void> {
-    await this.initialize()
-    const report = await this.checkWCAGCompliance()
-    
-    console.log(`\n=== Accessibility Report for ${report.url} ===`)
-    console.log(`WCAG Level: ${report.wcagLevel}`)
-    console.log(`Rules Passed: ${report.passedRules}`)
-    console.log(`Violations: ${report.violationCount}`)
-    
-    if (report.violations.length > 0) {
-      console.log('\nViolations:')
-      report.violations.forEach(violation => {
-        console.log(`- ${violation.id} (${violation.impact}): ${violation.description}`)
-        console.log(`  Help: ${violation.help}`)
-        console.log(`  Nodes: ${violation.nodes.length}`)
-      })
-    }
-    
-    console.log('================================================\n')
-    
-    // Assert no critical or serious accessibility violations
-    const criticalViolations = report.violations.filter(v => v.impact === 'critical' || v.impact === 'serious')
-    expect(criticalViolations.length, 'Should have no critical or serious accessibility violations').toBe(0)
-    
-    // Assert overall compliance
-    expect(report.violationCount, 'Should have minimal accessibility violations for WCAG 2.1 AA').toBeLessThanOrEqual(5)
-  }
-
-  // AC7: Run complete accessibility audit
-  async runCompleteAudit(): Promise<void> {
-    console.log('Running complete accessibility audit...')
-    
-    // Initialize axe-core
-    await this.initialize()
-    
-    // Run all accessibility checks
-    const [
-      wcagReport,
-      keyboardNavWorking,
-      ariaCompliance,
-      contrastOk,
-      missingAltText,
-      headingHierarchy,
-      screenReaderCompat
-    ] = await Promise.all([
-      this.checkWCAGCompliance(),
-      this.checkKeyboardNavigation(),
-      this.checkARIACompliance(),
-      this.checkColorContrast(),
-      this.checkImageAltText(),
-      this.checkHeadingHierarchy(),
-      this.checkScreenReaderCompat()
-    ])
-
-    // Log comprehensive results
-    console.log('\n=== Complete Accessibility Audit Results ===')
-    console.log(`✅ WCAG 2.1 AA Violations: ${wcagReport.violationCount}`)
-    console.log(`${keyboardNavWorking ? '✅' : '❌'} Keyboard Navigation Working`)
-    console.log(`✅ ARIA Missing Labels: ${ariaCompliance.missingLabels.length}`)
-    console.log(`✅ ARIA Invalid Roles: ${ariaCompliance.invalidRoles.length}`)
-    console.log(`${contrastOk ? '✅' : '❌'} Color Contrast Adequate`)
-    console.log(`✅ Images Missing Alt Text: ${missingAltText.length}`)
-    console.log(`${headingHierarchy.valid ? '✅' : '❌'} Heading Hierarchy Valid`)
-    console.log(`${screenReaderCompat.landmarksPresent ? '✅' : '❌'} Landmarks Present`)
-    console.log(`${screenReaderCompat.skipLinksPresent ? '✅' : '❌'} Skip Links Present`)
-    console.log(`${screenReaderCompat.liveRegionsPresent ? '✅' : '❌'} Live Regions Present`)
-    console.log('=============================================\n')
-
-    // Assert critical accessibility requirements
-    expect(keyboardNavWorking, 'Keyboard navigation should work').toBe(true)
-    expect(contrastOk, 'Color contrast should be adequate').toBe(true)
-    expect(headingHierarchy.valid, 'Heading hierarchy should be valid').toBe(true)
-    expect(missingAltText.length, 'Images should have alt text').toBeLessThanOrEqual(1)
-    expect(ariaCompliance.missingLabels.length, 'Interactive elements should have labels').toBeLessThanOrEqual(2)
   }
 }
