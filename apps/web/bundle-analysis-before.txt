@@ -1,0 +1,44 @@
+🔍 Analyzing Next.js Bundle...
+=====================================
+
+📊 Bundle Size Summary
+----------------------
+Initial JavaScript: 247.25 KB
+Total JavaScript: 1595.40 KB
+Total CSS: 1.68 KB
+Combined Total: 1597.08 KB
+
+🗂️  Top JavaScript Chunks
+---------------------------
+ 1. vendor-69fc3c12d2758e26.js            537.10 KB
+ 2. 1dd3208c-b0a628ce4ead0854.js          168.78 KB
+ 3. framework-3664cab31236a9fa.js         136.70 KB
+ 4. polyfills-42372ed130431b0a.js         109.96 KB
+ 5. gantt-3d4251181d4e4ee4.js              95.67 KB
+ 6. 396-a4674359c7845830.js                77.58 KB
+ 7. app/progress-management-demo/page-264f0db54ca04a9d.js    76.76 KB
+ 8. app/layout-88feb317f52b173f.js         55.94 KB
+ 9. 795-7f17f2c527c98824.js                42.27 KB
+10. 39-c9600d24d9b0bd3b.js                 31.47 KB
+
+🎨 CSS Files
+-------------
+ 1. 7ee1337f430bcdff.css                    1.68 KB
+
+🏥 Bundle Health Check
+----------------------
+❌ Initial JS Bundle Size: 247.25 KB (164.8% of threshold)
+❌ Total JS Bundle Size: 1595.40 KB (319.1% of threshold)
+✅ CSS Bundle Size: 1.68 KB (3.4% of threshold)
+
+💡 Optimization Recommendations
+--------------------------------
+• Consider implementing code splitting for large components
+• Large chunks detected - consider further splitting:
+  - vendor-69fc3c12d2758e26.js (537.10 KB)
+  - 1dd3208c-b0a628ce4ead0854.js (168.78 KB)
+  - framework-3664cab31236a9fa.js (136.70 KB)
+  - polyfills-42372ed130431b0a.js (109.96 KB)
+• Total bundle size is large - consider tree shaking unused code
+
+📄 Detailed analysis saved to: /mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/apps/web/bundle-analysis.json

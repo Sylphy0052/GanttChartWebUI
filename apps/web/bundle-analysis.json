@@ -1,0 +1,69 @@
+{
+  "timestamp": "2025-09-07T08:12:47.042Z",
+  "javascript": {
+    "initial": 110.73,
+    "total": 1628.6399999999996,
+    "chunks": [
+      {
+        "name": "nextjs-c6eb442d-f21dd800b68d21ef.js",
+        "path": "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/apps/web/.next/static/chunks/nextjs-c6eb442d-f21dd800b68d21ef.js",
+        "size": 168.78
+      },
+      {
+        "name": "react-6d9a0759c87871dc.js",
+        "path": "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/apps/web/.next/static/chunks/react-6d9a0759c87871dc.js",
+        "size": 136.72
+      },
+      {
+        "name": "polyfills-42372ed130431b0a.js",
+        "path": "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/apps/web/.next/static/chunks/polyfills-42372ed130431b0a.js",
+        "size": 109.96
+      },
+      {
+        "name": "dnd-746d58dae4ddad62.js",
+        "path": "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/apps/web/.next/static/chunks/dnd-746d58dae4ddad62.js",
+        "size": 49.52
+      },
+      {
+        "name": "ui-8d56c7ce-8e4bee2d142df129.js",
+        "path": "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/apps/web/.next/static/chunks/ui-8d56c7ce-8e4bee2d142df129.js",
+        "size": 46.67
+      },
+      {
+        "name": "7560-97a4c446a6ce6e94.js",
+        "path": "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/apps/web/.next/static/chunks/7560-97a4c446a6ce6e94.js",
+        "size": 46.03
+      },
+      {
+        "name": "gantt-a26360c5-6aade6ec28a4976a.js",
+        "path": "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/apps/web/.next/static/chunks/gantt-a26360c5-6aade6ec28a4976a.js",
+        "size": 42.11
+      },
+      {
+        "name": "nextjs-7b390a09-48a52149f7bed277.js",
+        "path": "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/apps/web/.next/static/chunks/nextjs-7b390a09-48a52149f7bed277.js",
+        "size": 40.73
+      },
+      {
+        "name": "90-4926d2d916d95466.js",
+        "path": "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/apps/web/.next/static/chunks/90-4926d2d916d95466.js",
+        "size": 39.33
+      },
+      {
+        "name": "nextjs-27161c75-d6fee90ec42b4c42.js",
+        "path": "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/apps/web/.next/static/chunks/nextjs-27161c75-d6fee90ec42b4c42.js",
+        "size": 38.54
+      }
+    ]
+  },
+  "css": {
+    "total": 1.68,
+    "files": [
+      {
+        "name": "7ee1337f430bcdff.css",
+        "path": "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/apps/web/.next/static/css/7ee1337f430bcdff.css",
+        "size": 1.68
+      }
+    ]
+  }
+}
