@@ -11,12 +11,16 @@ import {
   WebhookProcessResult 
 } from './interfaces/webhook.interface';
 import { SignatureValidator } from './utils/signature-validator.util';
+import { IssueSyncService } from './services/issue-sync.service';
 
 @Injectable()
 export class IntegrationsService {
   private readonly logger = new Logger(IntegrationsService.name);
 
-  constructor(private configService: ConfigService) {}
+  constructor(
+    private configService: ConfigService,
+    private issueSyncService: IssueSyncService,
+  ) {}
 
   /**
    * Validates incoming webhook event
@@ -33,11 +37,28 @@ export class IntegrationsService {
     eventData: WebhookEventDto,
   ): Promise<WebhookValidationResult> {
     try {
+      // Skip signature validation in development mode
+      const isDevMode = this.configService.get('NODE_ENV') === 'development';
+      if (isDevMode && !signature) {
+        this.logger.warn('Skipping webhook signature validation in development mode');
+        return {
+          isValid: true,
+          parsedEvent: this.createWebhookEvent(source, eventData),
+        };
+      }
+      
       // Get webhook secret from configuration
       const secretKey = this.getWebhookSecret(source);
       
       if (!secretKey) {
         this.logger.warn(`No webhook secret configured for source: ${source}`);
+        if (isDevMode) {
+          // Allow in dev mode without secret
+          return {
+            isValid: true,
+            parsedEvent: this.createWebhookEvent(source, eventData),
+          };
+        }
         return {
           isValid: false,
           error: 'Webhook secret not configured',
@@ -176,12 +197,16 @@ export class IntegrationsService {
 
     this.logger.log(`Issue created: ${issue.title} (${issue.id}) from ${event.source}`);
     
-    // TODO: Implement issue synchronization with internal system
-    // This will be implemented in subsequent acceptance criteria
+    // Issue synchronization with internal system
+    const syncResult = await this.issueSyncService.syncCreatedIssue(event);
+    
+    if (!syncResult.success) {
+      this.logger.warn(`Issue sync failed: ${syncResult.message}`);
+    }
     
     return {
       success: true,
-      message: `Issue creation event processed: ${issue.title}`,
+      message: `Issue creation event processed: ${issue.title}${syncResult.success ? ' and synced' : ' but sync failed'}`,
       processedAt,
       eventId,
     };
@@ -208,11 +233,16 @@ export class IntegrationsService {
 
     this.logger.log(`Issue updated: ${issue.title} (${issue.id}) from ${event.source}`);
     
-    // TODO: Implement issue synchronization with internal system
+    // Issue synchronization with internal system
+    const syncResult = await this.issueSyncService.syncUpdatedIssue(event);
+    
+    if (!syncResult.success) {
+      this.logger.warn(`Issue update sync failed: ${syncResult.message}`);
+    }
     
     return {
       success: true,
-      message: `Issue update event processed: ${issue.title}`,
+      message: `Issue update event processed: ${issue.title}${syncResult.success ? ' and synced' : ' but sync failed'}`,
       processedAt,
       eventId,
     };
@@ -239,11 +269,16 @@ export class IntegrationsService {
 
     this.logger.log(`Issue closed: ${issue.title} (${issue.id}) from ${event.source}`);
     
-    // TODO: Implement issue synchronization with internal system
+    // Issue synchronization with internal system
+    const syncResult = await this.issueSyncService.syncClosedIssue(event);
+    
+    if (!syncResult.success) {
+      this.logger.warn(`Issue closure sync failed: ${syncResult.message}`);
+    }
     
     return {
       success: true,
-      message: `Issue closure event processed: ${issue.title}`,
+      message: `Issue closure event processed: ${issue.title}${syncResult.success ? ' and synced' : ' but sync failed'}`,
       processedAt,
       eventId,
     };
@@ -255,6 +290,18 @@ export class IntegrationsService {
   private getWebhookSecret(source: string): string | undefined {
     const configKey = `WEBHOOK_SECRET_${source.toUpperCase()}`;
     return this.configService.get<string>(configKey);
+  }
+
+  /**
+   * Creates a WebhookEvent from source and event data
+   */
+  private createWebhookEvent(source: string, eventData: WebhookEventDto): WebhookEvent {
+    return {
+      source: source as any,
+      event_type: eventData.event_type,
+      timestamp: eventData.timestamp,
+      payload: eventData.payload,
+    };
   }
 
   /**
