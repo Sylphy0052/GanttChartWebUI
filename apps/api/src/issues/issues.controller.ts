@@ -41,6 +41,12 @@ import {
   DependencyResponseDto, 
   DeleteDependencyDto 
 } from './dto/dependency.dto';
+import {
+  ProgressUpdateDto,
+  BatchProgressUpdateDto,
+  ProgressUpdateResponseDto,
+  BatchProgressUpdateResponseDto
+} from './dto/progress-update.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt.guard';
 
 @ApiTags('Issues')
@@ -204,6 +210,68 @@ export class IssuesController {
     res.set('ETag', etag);
     
     return res.json(updatedIssue);
+  }
+
+  @Patch(':id/progress')
+  @ApiOperation({ 
+    summary: 'Update issue progress with leaf-task validation',
+    description: 'Updates progress for leaf tasks only. Parent task progress is automatically calculated from children.'
+  })
+  @ApiHeader({
+    name: 'If-Match',
+    description: 'ETag value for optimistic locking',
+    required: true,
+    schema: { type: 'string' }
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Progress updated successfully',
+    type: ProgressUpdateResponseDto
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Bad request - cannot update progress on parent tasks or validation failed'
+  })
+  @ApiResponse({
+    status: 404,
+    description: 'Issue not found'
+  })
+  @ApiResponse({
+    status: 409,
+    description: 'Conflict - issue has been modified by another user'
+  })
+  @ApiResponse({
+    status: 412,
+    description: 'Precondition Failed - If-Match header missing or invalid'
+  })
+  async updateProgress(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body(ValidationPipe) progressUpdateDto: ProgressUpdateDto,
+    @Headers('if-match') ifMatch: string,
+    @Request() req: any
+  ): Promise<ProgressUpdateResponseDto> {
+    return this.issuesService.updateProgress(id, progressUpdateDto, ifMatch, req.user.id);
+  }
+
+  @Post('progress/batch')
+  @ApiOperation({ 
+    summary: 'Batch update progress for multiple issues',
+    description: 'Updates progress for multiple leaf tasks in a single transaction with automatic parent aggregation.'
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Batch progress update completed',
+    type: BatchProgressUpdateResponseDto
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Bad request - validation failed or contains parent task updates'
+  })
+  async batchUpdateProgress(
+    @Body(ValidationPipe) batchProgressUpdateDto: BatchProgressUpdateDto,
+    @Request() req: any
+  ): Promise<BatchProgressUpdateResponseDto> {
+    return this.issuesService.batchUpdateProgress(batchProgressUpdateDto, req.user.id);
   }
 
   @Put(':id/parent')

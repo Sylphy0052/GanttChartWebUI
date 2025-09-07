@@ -20,6 +20,12 @@ import {
   WBSReorderResponseDto 
 } from './dto/wbs-hierarchy.dto';
 import { CreateDependencyDto, DependencyResponseDto, DeleteDependencyDto } from './dto/dependency.dto';
+import {
+  ProgressUpdateDto,
+  BatchProgressUpdateDto,
+  ProgressUpdateResponseDto,
+  BatchProgressUpdateResponseDto
+} from './dto/progress-update.dto';
 import { WBSHierarchyUtils } from '../common/utils/wbs-hierarchy.utils';
 import { WBSReorderingService, ProjectAuthContext } from '../services/wbs-reordering.service';
 import { ProjectRole } from '../auth/types/rbac.types';
@@ -219,6 +225,408 @@ export class IssuesService {
         updatedAt: new Date()
       }
     });
+  }
+
+  /**
+   * Update progress for leaf tasks only with validation and activity logging
+   */
+  async updateProgress(
+    id: string,
+    progressUpdateDto: ProgressUpdateDto,
+    ifMatch: string,
+    userId: string
+  ): Promise<ProgressUpdateResponseDto> {
+    if (!ifMatch) {
+      throw new PreconditionFailedException('If-Match header is required');
+    }
+
+    // Parse ETag to get version
+    const etagMatch = ifMatch.match(/^"v(\d+)-(\d+)"$/);
+    if (!etagMatch) {
+      throw new PreconditionFailedException('Invalid ETag format');
+    }
+
+    const expectedVersion = parseInt(etagMatch[1]);
+
+    // Get current issue with children count
+    const currentIssue = await this.prisma.issue.findUnique({
+      where: { id, deletedAt: null },
+      include: {
+        childIssues: {
+          select: { id: true, progress: true },
+          where: { deletedAt: null }
+        }
+      }
+    });
+
+    if (!currentIssue) {
+      throw new NotFoundException('Issue not found');
+    }
+
+    if (currentIssue.version !== expectedVersion) {
+      throw new ConflictException('Issue has been modified by another user. Please refresh and try again.');
+    }
+
+    // Validate leaf task constraint (AC3: Progress change validation prevents invalid parent task progress modification)
+    const isLeafTask = currentIssue.childIssues.length === 0;
+    const validationResults = {
+      isValid: true,
+      warnings: [] as string[],
+      errors: [] as string[]
+    };
+
+    if (!isLeafTask) {
+      validationResults.isValid = false;
+      validationResults.errors.push('Cannot directly update progress on parent tasks. Progress is automatically calculated from child tasks.');
+      throw new BadRequestException('Cannot update progress on parent tasks. Progress is calculated from children.');
+    }
+
+    const previousProgress = currentIssue.progress;
+    const newProgress = progressUpdateDto.progress;
+
+    // Additional validation
+    if (newProgress < 0 || newProgress > 100) {
+      validationResults.errors.push('Progress must be between 0 and 100');
+    }
+
+    if (validationResults.errors.length > 0) {
+      throw new BadRequestException(validationResults.errors.join('; '));
+    }
+
+    // Update progress with transaction for consistency
+    const updatedIssue = await this.prisma.$transaction(async (tx) => {
+      // Update the leaf task progress
+      const updated = await tx.issue.update({
+        where: { id },
+        data: {
+          progress: newProgress,
+          version: expectedVersion + 1,
+          updatedAt: new Date()
+        }
+      });
+
+      // Log the progress change (AC4: ActivityLog captures progress changes with before/after values and user attribution)
+      await tx.activityLog.create({
+        data: {
+          projectId: currentIssue.projectId,
+          entityType: 'issue',
+          entityId: id,
+          issueId: id,
+          action: 'progress',
+          actor: userId,
+          before: {
+            progress: previousProgress,
+            comment: 'Previous progress value'
+          },
+          after: {
+            progress: newProgress,
+            comment: progressUpdateDto.comment || 'Progress updated'
+          },
+          metadata: {
+            progressChange: newProgress - previousProgress,
+            isLeafTask: true,
+            userComment: progressUpdateDto.comment
+          }
+        }
+      });
+
+      // AC5: Progress aggregation automatically calculates parent task progress from children
+      if (currentIssue.parentIssueId) {
+        await this.recalculateParentProgress(tx, currentIssue.parentIssueId, userId);
+      }
+
+      return updated;
+    });
+
+    // Generate new ETag
+    const etag = this.generateETag(updatedIssue.version, updatedIssue.updatedAt);
+
+    // Estimate completion date if progress is significant
+    let completionEstimate: string | undefined;
+    if (newProgress > 0 && newProgress < 100) {
+      // Simple linear estimation based on current progress and elapsed time
+      const createdDate = new Date(currentIssue.createdAt);
+      const currentDate = new Date();
+      const elapsedDays = Math.ceil((currentDate.getTime() - createdDate.getTime()) / (1000 * 60 * 60 * 24));
+      const estimatedTotalDays = Math.ceil(elapsedDays * (100 / newProgress));
+      const estimatedCompletion = new Date(createdDate);
+      estimatedCompletion.setDate(estimatedCompletion.getDate() + estimatedTotalDays);
+      completionEstimate = estimatedCompletion.toISOString();
+    }
+
+    return {
+      issueId: id,
+      previousProgress,
+      newProgress,
+      progressMetrics: {
+        isLeafTask: true,
+        hasChildren: false,
+        childrenCount: 0,
+        completionEstimate
+      },
+      validationResults,
+      etag,
+      updatedAt: updatedIssue.updatedAt.toISOString()
+    };
+  }
+
+  /**
+   * AC2: Batch progress update endpoint handles multiple issues in single transaction
+   */
+  async batchUpdateProgress(
+    batchProgressUpdateDto: BatchProgressUpdateDto,
+    userId: string
+  ): Promise<BatchProgressUpdateResponseDto> {
+    const results: ProgressUpdateResponseDto[] = [];
+    const errors: Array<{ issueId: string; error: string; code: string }> = [];
+    const aggregatedMetrics: Array<{
+      parentIssueId: string;
+      previousAggregatedProgress: number;
+      newAggregatedProgress: number;
+      affectedChildrenCount: number;
+    }> = [];
+
+    // Validate all updates before processing
+    const issueIds = batchProgressUpdateDto.updates.map(update => update.issueId);
+    const issues = await this.prisma.issue.findMany({
+      where: {
+        id: { in: issueIds },
+        deletedAt: null
+      },
+      include: {
+        childIssues: {
+          select: { id: true },
+          where: { deletedAt: null }
+        }
+      }
+    });
+
+    // Validate leaf task constraint for all issues
+    for (const update of batchProgressUpdateDto.updates) {
+      const issue = issues.find(i => i.id === update.issueId);
+      if (!issue) {
+        errors.push({
+          issueId: update.issueId,
+          error: 'Issue not found',
+          code: 'ISSUE_NOT_FOUND'
+        });
+        continue;
+      }
+
+      if (issue.childIssues.length > 0) {
+        errors.push({
+          issueId: update.issueId,
+          error: 'Cannot update progress on parent tasks',
+          code: 'PARENT_TASK_PROGRESS_UPDATE'
+        });
+      }
+
+      // Validate ETag if provided
+      if (update.etag) {
+        const etagMatch = update.etag.match(/^"v(\d+)-(\d+)"$/);
+        if (!etagMatch) {
+          errors.push({
+            issueId: update.issueId,
+            error: 'Invalid ETag format',
+            code: 'INVALID_ETAG'
+          });
+          continue;
+        }
+
+        const expectedVersion = parseInt(etagMatch[1]);
+        if (issue.version !== expectedVersion) {
+          errors.push({
+            issueId: update.issueId,
+            error: 'Issue has been modified by another user',
+            code: 'VERSION_CONFLICT'
+          });
+        }
+      }
+    }
+
+    // If there are validation errors, return them
+    if (errors.length > 0) {
+      throw new BadRequestException({
+        message: 'Batch update validation failed',
+        errors
+      });
+    }
+
+    // Process updates in transaction
+    await this.prisma.$transaction(async (tx) => {
+      const parentIssuesAffected = new Set<string>();
+
+      for (const update of batchProgressUpdateDto.updates) {
+        const issue = issues.find(i => i.id === update.issueId)!;
+        const previousProgress = issue.progress;
+
+        // Update progress
+        const updatedIssue = await tx.issue.update({
+          where: { id: update.issueId },
+          data: {
+            progress: update.progress,
+            version: { increment: 1 },
+            updatedAt: new Date()
+          }
+        });
+
+        // Log activity
+        await tx.activityLog.create({
+          data: {
+            projectId: issue.projectId,
+            entityType: 'issue',
+            entityId: update.issueId,
+            issueId: update.issueId,
+            action: 'progress',
+            actor: userId,
+            before: { progress: previousProgress },
+            after: { progress: update.progress },
+            metadata: {
+              batchUpdate: true,
+              globalComment: batchProgressUpdateDto.globalComment,
+              userComment: update.comment,
+              progressChange: update.progress - previousProgress
+            }
+          }
+        });
+
+        // Track parent issues for progress aggregation
+        if (issue.parentIssueId) {
+          parentIssuesAffected.add(issue.parentIssueId);
+        }
+
+        // Create result
+        results.push({
+          issueId: update.issueId,
+          previousProgress,
+          newProgress: update.progress,
+          progressMetrics: {
+            isLeafTask: true,
+            hasChildren: false,
+            childrenCount: 0
+          },
+          validationResults: {
+            isValid: true,
+            warnings: [],
+            errors: []
+          },
+          etag: this.generateETag(updatedIssue.version, updatedIssue.updatedAt),
+          updatedAt: updatedIssue.updatedAt.toISOString()
+        });
+      }
+
+      // Recalculate parent progress for all affected parents
+      for (const parentId of parentIssuesAffected) {
+        const previousParent = await tx.issue.findUnique({
+          where: { id: parentId },
+          select: { progress: true }
+        });
+
+        if (previousParent) {
+          const newParentProgress = await this.recalculateParentProgress(tx, parentId, userId);
+          
+          aggregatedMetrics.push({
+            parentIssueId: parentId,
+            previousAggregatedProgress: previousParent.progress,
+            newAggregatedProgress: newParentProgress,
+            affectedChildrenCount: batchProgressUpdateDto.updates.filter(u => 
+              issues.find(i => i.id === u.issueId)?.parentIssueId === parentId
+            ).length
+          });
+        }
+      }
+    });
+
+    return {
+      successCount: results.length,
+      errorCount: errors.length,
+      results,
+      errors,
+      aggregatedMetrics
+    };
+  }
+
+  /**
+   * AC5: Progress aggregation automatically calculates parent task progress from children
+   */
+  private async recalculateParentProgress(
+    tx: any,
+    parentIssueId: string,
+    userId: string
+  ): Promise<number> {
+    // Get all direct child issues
+    const childIssues = await tx.issue.findMany({
+      where: {
+        parentIssueId,
+        deletedAt: null
+      },
+      select: {
+        id: true,
+        progress: true,
+        estimateValue: true
+      }
+    });
+
+    if (childIssues.length === 0) {
+      return 0;
+    }
+
+    // Calculate weighted average progress based on estimate values
+    let totalWeightedProgress = 0;
+    let totalWeight = 0;
+
+    for (const child of childIssues) {
+      const weight = child.estimateValue || 1; // Default weight of 1 if no estimate
+      totalWeightedProgress += child.progress * weight;
+      totalWeight += weight;
+    }
+
+    const aggregatedProgress = totalWeight > 0 ? Math.round(totalWeightedProgress / totalWeight) : 0;
+
+    // Update parent progress
+    const updatedParent = await tx.issue.update({
+      where: { id: parentIssueId },
+      data: {
+        progress: aggregatedProgress,
+        version: { increment: 1 },
+        updatedAt: new Date()
+      }
+    });
+
+    // Log the aggregation
+    await tx.activityLog.create({
+      data: {
+        projectId: updatedParent.projectId,
+        entityType: 'issue',
+        entityId: parentIssueId,
+        issueId: parentIssueId,
+        action: 'progress',
+        actor: userId,
+        after: { progress: aggregatedProgress },
+        metadata: {
+          aggregationType: 'weighted_average',
+          childrenCount: childIssues.length,
+          calculatedFrom: 'child_progress_aggregation'
+        }
+      }
+    });
+
+    // Recursively update grandparent if exists
+    const parent = await tx.issue.findUnique({
+      where: { id: parentIssueId },
+      select: { parentIssueId: true }
+    });
+
+    if (parent?.parentIssueId) {
+      await this.recalculateParentProgress(tx, parent.parentIssueId, userId);
+    }
+
+    return aggregatedProgress;
+  }
+
+  private generateETag(version: number, updatedAt: Date): string {
+    const timestamp = updatedAt.getTime();
+    return `"v${version}-${timestamp}"`;
   }
 
   async removeWithETag(id: string, ifMatch: string, userId: string) {

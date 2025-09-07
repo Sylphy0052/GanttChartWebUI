@@ -3,6 +3,15 @@ import { IsString, IsNotEmpty, IsOptional, IsNumber, IsEnum, IsUUID } from 'clas
 
 export class CreateDependencyDto {
   @ApiProperty({ 
+    description: 'Predecessor issue ID (the issue that must finish before the successor starts)',
+    example: 'uuid-predecessor-issue'
+  })
+  @IsString()
+  @IsNotEmpty()
+  @IsUUID()
+  predecessorId: string;
+
+  @ApiProperty({ 
     description: 'Successor issue ID (the issue that depends on the predecessor)',
     example: 'uuid-successor-issue'
   })

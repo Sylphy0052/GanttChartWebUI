@@ -1,49 +1,95 @@
-import { Injectable, NotFoundException, BadRequestException, ForbiddenException, HttpException, HttpStatus } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ForbiddenException, HttpException, HttpStatus, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateProjectDto } from './dto/create-project.dto';
 import { UpdateProjectDto } from './dto/update-project.dto';
-import { ProjectPasswordDto, ProjectAccessDto } from './dto/project-access.dto';
+import { ProjectPasswordDto, ProjectAccessDto, ProjectAccessResponseDto } from './dto/project-access.dto';
 import { WBSTreeResponseDto, WBSTreeQueryDto } from '../issues/dto/wbs-tree.dto';
-import { DependencyResponseDto } from '../issues/dto/dependency.dto';
+import { DependencyResponseDto, CreateDependencyDto } from '../issues/dto/dependency.dto';
 import { WBSHierarchyUtils } from '../common/utils/wbs-hierarchy.utils';
+import { ProjectAuthService } from '../auth/project-auth.service';
 import * as argon2 from 'argon2';
 
 @Injectable()
 export class ProjectsService {
-  // Rate limiting for password attempts
-  private readonly attemptTracker = new Map<string, {count: number, resetAt: number}>();
-  private readonly MAX_ATTEMPTS = 5;
-  private readonly WINDOW_MS = 15 * 60 * 1000; // 15 minutes
-
   private wbsUtils: WBSHierarchyUtils;
 
-  constructor(private prisma: PrismaService) {
+  constructor(
+    private prisma: PrismaService,
+    private projectAuthService: ProjectAuthService
+  ) {
     this.wbsUtils = new WBSHierarchyUtils(prisma);
   }
 
-  async create(data: CreateProjectDto) {
-    return this.prisma.project.create({
+  async create(data: CreateProjectDto, userId?: string) {
+    const project = await this.prisma.project.create({
       data: {
         name: data.name,
         visibility: data.visibility || 'private'
       }
     });
+
+    // If userId is provided, add the creator as project owner
+    if (userId) {
+      await this.prisma.projectMember.create({
+        data: {
+          projectId: project.id,
+          userId: userId,
+          role: 'owner'
+        }
+      });
+    }
+
+    return project;
   }
 
-  async findAll() {
+  async findAll(userId?: string) {
+    if (!userId) {
+      // If no user context, only return public projects
+      return this.prisma.project.findMany({
+        where: {
+          visibility: 'public'
+        },
+        select: {
+          id: true,
+          name: true,
+          visibility: true,
+          createdAt: true,
+          updatedAt: true,
+          // Don't return passwordHash
+        }
+      });
+    }
+
+    // For authenticated users, return projects they have access to
     return this.prisma.project.findMany({
+      where: {
+        OR: [
+          { visibility: 'public' },
+          { visibility: 'password' }, // List password-protected projects (require auth to access)
+          { 
+            AND: [
+              { visibility: 'private' },
+              { members: { some: { userId: userId, isActive: true } } }
+            ]
+          }
+        ]
+      },
       select: {
         id: true,
         name: true,
         visibility: true,
         createdAt: true,
         updatedAt: true,
-        // Don't return passwordHash
+        // Include membership info for the requesting user
+        members: {
+          where: { userId: userId },
+          select: { role: true, isActive: true }
+        }
       }
     });
   }
 
-  async findOne(id: string) {
+  async findOne(id: string, userId?: string) {
     const project = await this.prisma.project.findUnique({
       where: { id },
       select: {
@@ -52,7 +98,11 @@ export class ProjectsService {
         visibility: true,
         createdAt: true,
         updatedAt: true,
-        // Don't return passwordHash
+        // Include membership info if userId provided
+        members: userId ? {
+          where: { userId: userId },
+          select: { role: true, isActive: true }
+        } : false
       }
     });
 
@@ -60,7 +110,126 @@ export class ProjectsService {
       throw new NotFoundException('Project not found');
     }
 
+    // Access control logic
+    if (project.visibility === 'private') {
+      if (!userId) {
+        throw new ForbiddenException('Access denied. Project is private.');
+      }
+      const membership = project.members?.[0];
+      if (!membership?.isActive) {
+        throw new ForbiddenException('Access denied. You are not a member of this project.');
+      }
+    }
+
     return project;
+  }
+
+  // AC3: Get optimized Gantt schedule data from materialized view
+  async getOptimizedGanttSchedule(
+    projectId: string,
+    options: { includeHistory?: boolean } = {}
+  ) {
+    const startTime = Date.now();
+
+    try {
+      // Query materialized view for optimized performance
+      const scheduleData = await this.prisma.$queryRaw`
+        SELECT 
+          csv.computed_schedule_id,
+          csv.calculated_at,
+          csv.algorithm,
+          csv.computed_end_date as project_end_date,
+          csv.total_duration,
+          csv.critical_path,
+          
+          -- Aggregate task data for optimal transfer
+          json_agg(
+            json_build_object(
+              'taskId', csv.task_id,
+              'title', csv.task_title,
+              'assigneeId', csv.assignee_id,
+              'status', csv.task_status,
+              'progress', csv.progress,
+              'earliestStartDate', csv.earliest_start_date,
+              'earliestFinishDate', csv.earliest_finish_date,
+              'latestStartDate', csv.latest_start_date,
+              'latestFinishDate', csv.latest_finish_date,
+              'totalFloat', ROUND((csv.total_float / 1440.0)::numeric, 2), -- Convert minutes to days
+              'criticalPath', csv.critical_path,
+              'riskLevel', csv.risk_level,
+              'estimateValue', csv.estimate_value,
+              'estimateUnit', csv.estimate_unit
+            ) ORDER BY csv.earliest_start_date ASC
+          ) as tasks
+          
+        FROM computed_schedule_view csv
+        WHERE csv.project_id = ${projectId}::uuid
+        GROUP BY 
+          csv.computed_schedule_id,
+          csv.calculated_at,
+          csv.algorithm,
+          csv.computed_end_date,
+          csv.total_duration,
+          csv.critical_path
+        ORDER BY csv.calculated_at DESC
+        LIMIT 1;
+      `;
+
+      const queryTime = Date.now() - startTime;
+
+      if (!scheduleData || scheduleData.length === 0) {
+        throw new NotFoundException('No computed schedule found for this project');
+      }
+
+      const schedule = scheduleData[0];
+
+      // Include historical data if requested
+      let history = null;
+      if (options.includeHistory) {
+        history = await this.prisma.$queryRaw`
+          SELECT 
+            cs.id,
+            cs.calculated_at,
+            cs.algorithm,
+            cs.applied,
+            cs.applied_at,
+            COUNT(tsh.task_id) as task_count
+          FROM computed_schedules cs
+          LEFT JOIN task_schedule_history tsh ON cs.id = tsh.computed_schedule_id
+          WHERE cs.project_id = ${projectId}::uuid
+          GROUP BY cs.id, cs.calculated_at, cs.algorithm, cs.applied, cs.applied_at
+          ORDER BY cs.calculated_at DESC
+          LIMIT 10;
+        `;
+      }
+
+      const responseTime = Date.now() - startTime;
+
+      return {
+        schedule: {
+          computedScheduleId: schedule.computed_schedule_id,
+          calculatedAt: schedule.calculated_at,
+          algorithm: schedule.algorithm,
+          projectEndDate: schedule.project_end_date,
+          totalDuration: schedule.total_duration,
+          criticalPath: schedule.critical_path,
+          tasks: schedule.tasks
+        },
+        history,
+        performance: {
+          queryTime,
+          responseTime,
+          taskCount: schedule.tasks?.length || 0
+        },
+        cacheStatus: responseTime < 200 ? 'optimal' : 'slow'
+      };
+
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw error;
+      }
+      throw new BadRequestException(`Failed to retrieve schedule data: ${error.message}`);
+    }
   }
 
   async getProjectWBS(projectId: string, query: Omit<WBSTreeQueryDto, 'projectId'>): Promise<WBSTreeResponseDto> {
@@ -206,7 +375,7 @@ export class ProjectsService {
     });
   }
 
-  // Password management methods
+  // Password management methods with enhanced validation
   async setProjectPassword(id: string, passwordDto: ProjectPasswordDto) {
     const project = await this.findOne(id); // Validates existence
 
@@ -214,6 +383,7 @@ export class ProjectsService {
       throw new BadRequestException('Project must have password visibility to set a password');
     }
 
+    // AC4: Enhanced password validation is handled by DTO validation
     const passwordHash = await this.hashPassword(passwordDto.password);
     
     return this.prisma.project.update({
@@ -230,12 +400,55 @@ export class ProjectsService {
     });
   }
 
-  async authenticateProjectAccess(id: string, accessDto: ProjectAccessDto, clientId: string): Promise<{ accessToken: string; expiresAt: number }> {
-    // Check rate limit first
-    if (!this.checkRateLimit(clientId)) {
-      const remainingAttempts = this.getRemainingAttempts(clientId);
-      throw new HttpException(`Too many password attempts. Try again later. Remaining attempts: ${remainingAttempts}`, HttpStatus.TOO_MANY_REQUESTS);
+  /**
+   * Enhanced authentication with rate limiting, session management, and activity logging
+   */
+  async authenticateProjectAccess(
+    id: string, 
+    accessDto: ProjectAccessDto, 
+    clientId: string
+  ): Promise<ProjectAccessResponseDto> {
+    // AC6: Check for admin override token first
+    if (accessDto.overrideToken) {
+      const isValidOverride = await this.projectAuthService.validateAdminOverride(id, accessDto.overrideToken);
+      if (isValidOverride) {
+        // Create session for admin override
+        const sessionInfo = await this.projectAuthService.createSession(id, clientId);
+        await this.projectAuthService.logAuthenticationEvent(id, clientId, 'login_success', {
+          type: 'admin_override',
+          overrideToken: accessDto.overrideToken.substring(0, 20) + '...'
+        });
+        
+        return {
+          accessToken: sessionInfo.accessToken,
+          expiresAt: sessionInfo.expiresAt.getTime(),
+          refreshToken: sessionInfo.refreshToken,
+          refreshExpiresAt: sessionInfo.refreshExpiresAt.getTime()
+        };
+      }
     }
+
+    // AC1: Enhanced rate limiting with exponential backoff
+    const rateLimitResult = await this.projectAuthService.checkRateLimit(clientId, id);
+    if (!rateLimitResult.allowed) {
+      // AC3: Log lockout event
+      await this.projectAuthService.logAuthenticationEvent(id, clientId, 'lockout', {
+        attemptsRemaining: rateLimitResult.attemptsRemaining,
+        lockedUntil: rateLimitResult.lockedUntil?.toISOString(),
+        nextAttemptIn: rateLimitResult.nextAttemptIn
+      });
+
+      throw new HttpException({
+        message: 'Too many password attempts. Account locked.',
+        error: 'Too Many Requests',
+        statusCode: HttpStatus.TOO_MANY_REQUESTS,
+        attemptsRemaining: rateLimitResult.attemptsRemaining,
+        lockedUntil: rateLimitResult.lockedUntil?.toISOString(),
+        nextAttemptIn: rateLimitResult.nextAttemptIn
+      }, HttpStatus.TOO_MANY_REQUESTS);
+    }
+
+    // Get project and validate
     const project = await this.prisma.project.findUnique({
       where: { id },
       select: {
@@ -258,20 +471,81 @@ export class ProjectsService {
       throw new BadRequestException('Project password not set');
     }
 
+    // Verify password
     const isValidPassword = await this.verifyPassword(accessDto.password, project.passwordHash);
     if (!isValidPassword) {
-      this.recordFailedAttempt(clientId);
+      // AC3: Log failed attempt
+      await this.projectAuthService.logAuthenticationEvent(id, clientId, 'login_failure', {
+        attemptsRemaining: rateLimitResult.attemptsRemaining - 1
+      });
+      
       throw new ForbiddenException('Invalid password');
     }
 
-    // Generate simple access token (24-hour expiry)
-    const expiresAt = Date.now() + (24 * 60 * 60 * 1000); // 24 hours
-    const accessToken = Buffer.from(`${project.id}:${expiresAt}`).toString('base64');
+    // AC2: Create session with refresh token capability
+    const sessionInfo = await this.projectAuthService.createSession(id, clientId);
+    
+    // AC3: Log successful authentication
+    await this.projectAuthService.logAuthenticationEvent(id, clientId, 'login_success', {
+      sessionId: sessionInfo.accessToken.substring(0, 20) + '...'
+    });
 
     return {
-      accessToken,
-      expiresAt
+      accessToken: sessionInfo.accessToken,
+      expiresAt: sessionInfo.expiresAt.getTime(),
+      refreshToken: sessionInfo.refreshToken,
+      refreshExpiresAt: sessionInfo.refreshExpiresAt.getTime()
     };
+  }
+
+  /**
+   * AC2: Refresh access token
+   */
+  async refreshProjectAccessToken(refreshToken: string): Promise<ProjectAccessResponseDto> {
+    const sessionInfo = await this.projectAuthService.refreshAccessToken(refreshToken);
+    
+    // Log token refresh
+    await this.projectAuthService.logAuthenticationEvent(
+      sessionInfo.accessToken.split(':')[0], // Extract project ID from token
+      'system', 
+      'token_refresh'
+    );
+
+    return {
+      accessToken: sessionInfo.accessToken,
+      expiresAt: sessionInfo.expiresAt.getTime(),
+      refreshToken: sessionInfo.refreshToken,
+      refreshExpiresAt: sessionInfo.refreshExpiresAt.getTime()
+    };
+  }
+
+  /**
+   * AC5: Secure logout with token blacklisting
+   */
+  async logoutProjectAccess(accessToken: string, refreshToken?: string): Promise<void> {
+    // Extract project and client info from token for logging
+    let projectId: string = '';
+    let clientId: string = '';
+    
+    try {
+      const tokenInfo = await this.projectAuthService.verifyAccessToken(accessToken);
+      projectId = tokenInfo.projectId;
+      clientId = tokenInfo.clientId;
+    } catch (error) {
+      // Token might be invalid, but still try to blacklist it
+    }
+
+    await this.projectAuthService.logout(accessToken, refreshToken, clientId, projectId);
+  }
+
+  /**
+   * AC6: Create admin override token for emergency access
+   */
+  async createAdminOverride(projectId: string, adminUserId: string, reason: string, expirationHours?: number): Promise<string> {
+    // Validate project exists
+    await this.findOne(projectId);
+    
+    return this.projectAuthService.createAdminOverride(projectId, adminUserId, reason, expirationHours);
   }
 
   // Password hashing functionality using Argon2id
@@ -292,41 +566,6 @@ export class ProjectsService {
       console.error('Password verification error:', error);
       return false;
     }
-  }
-
-  // Rate limiting methods
-  checkRateLimit(clientId: string): boolean {
-    const now = Date.now();
-    const attempts = this.attemptTracker.get(clientId);
-    
-    if (!attempts || now > attempts.resetAt) {
-      this.attemptTracker.set(clientId, {count: 1, resetAt: now + this.WINDOW_MS});
-      return true;
-    }
-    
-    if (attempts.count >= this.MAX_ATTEMPTS) {
-      return false;
-    }
-    
-    attempts.count++;
-    return true;
-  }
-
-  recordFailedAttempt(clientId: string): void {
-    // Failed attempts are already recorded in checkRateLimit
-    // This method can be used for additional logging/monitoring
-    console.warn(`Failed password attempt for client: ${clientId}`);
-  }
-
-  getRemainingAttempts(clientId: string): number {
-    const now = Date.now();
-    const attempts = this.attemptTracker.get(clientId);
-    
-    if (!attempts || now > attempts.resetAt) {
-      return this.MAX_ATTEMPTS;
-    }
-    
-    return Math.max(0, this.MAX_ATTEMPTS - attempts.count);
   }
 
   /**
@@ -362,5 +601,208 @@ export class ProjectsService {
       createdAt: dependency.createdAt.toISOString(),
       updatedAt: dependency.updatedAt.toISOString()
     }));
+  }
+
+  /**
+   * Create a new dependency between tasks in a project
+   */
+  async createDependency(projectId: string, createDto: CreateDependencyDto, userId?: string): Promise<DependencyResponseDto> {
+    // Validate project exists and user has access
+    await this.findOne(projectId, userId);
+
+    const { predecessorId, successorId, type = 'FS', lag = 0 } = createDto;
+
+    return await this.prisma.$transaction(async (tx) => {
+      // Check if predecessor and successor issues exist and belong to the project
+      const [predecessor, successor] = await Promise.all([
+        tx.issue.findFirst({
+          where: { 
+            id: predecessorId,
+            projectId: projectId,
+            deletedAt: null
+          }
+        }),
+        tx.issue.findFirst({
+          where: { 
+            id: successorId,
+            projectId: projectId,
+            deletedAt: null
+          }
+        })
+      ]);
+
+      if (!predecessor) {
+        throw new NotFoundException('Predecessor issue not found in project');
+      }
+      if (!successor) {
+        throw new NotFoundException('Successor issue not found in project');
+      }
+
+      // Check if dependency already exists
+      const existingDependency = await tx.dependency.findUnique({
+        where: {
+          projectId_predecessorId_successorId_type: {
+            projectId: projectId,
+            predecessorId: predecessor.id,
+            successorId: successor.id,
+            type: type
+          }
+        }
+      });
+
+      if (existingDependency) {
+        throw new ConflictException('Dependency already exists between these issues');
+      }
+
+      // Check for circular dependency
+      const wouldCreateCircularDependency = await this.checkCircularDependency(
+        tx, 
+        projectId,
+        predecessor.id,
+        successor.id
+      );
+
+      if (wouldCreateCircularDependency) {
+        throw new ConflictException('Creating this dependency would create a circular dependency');
+      }
+
+      // Create the dependency
+      const dependency = await tx.dependency.create({
+        data: {
+          projectId: projectId,
+          predecessorId: predecessor.id,
+          successorId: successor.id,
+          type: type,
+          lag: lag
+        }
+      });
+
+      // Log the activity
+      await this.logDependencyActivity(tx, 'CREATED', dependency, userId);
+
+      return {
+        id: dependency.id,
+        projectId: dependency.projectId,
+        predecessorId: dependency.predecessorId,
+        successorId: dependency.successorId,
+        type: dependency.type,
+        lag: dependency.lag,
+        createdAt: dependency.createdAt.toISOString(),
+        updatedAt: dependency.updatedAt.toISOString()
+      };
+    });
+  }
+
+  /**
+   * Delete a dependency by ID
+   */
+  async deleteDependency(dependencyId: string, userId?: string): Promise<void> {
+    await this.prisma.$transaction(async (tx) => {
+      // First, find the dependency and verify it exists
+      const dependency = await tx.dependency.findUnique({
+        where: { id: dependencyId },
+        include: {
+          project: {
+            select: {
+              id: true,
+              visibility: true,
+              members: userId ? {
+                where: { userId: userId },
+                select: { role: true, isActive: true }
+              } : undefined
+            }
+          }
+        }
+      });
+
+      if (!dependency) {
+        throw new NotFoundException('Dependency not found');
+      }
+
+      // Check access permissions for private projects
+      if (dependency.project.visibility === 'private') {
+        if (!userId) {
+          throw new ForbiddenException('Access denied. Project is private.');
+        }
+        const membership = dependency.project.members?.[0];
+        if (!membership?.isActive) {
+          throw new ForbiddenException('Access denied. You are not a member of this project.');
+        }
+      }
+
+      // Log the activity before deletion
+      await this.logDependencyActivity(tx, 'DELETED', dependency, userId);
+
+      // Delete the dependency
+      await tx.dependency.delete({
+        where: { id: dependencyId }
+      });
+    });
+  }
+
+  /**
+   * Check if creating a dependency would create a circular dependency
+   */
+  private async checkCircularDependency(
+    tx: any,
+    projectId: string,
+    newPredecessorId: string,
+    newSuccessorId: string
+  ): Promise<boolean> {
+    // Use depth-first search to check if there's already a path from newSuccessorId to newPredecessorId
+    const visited = new Set<string>();
+    
+    const hasPath = async (fromIssueId: string, toIssueId: string): Promise<boolean> => {
+      if (fromIssueId === toIssueId) return true;
+      if (visited.has(fromIssueId)) return false;
+      
+      visited.add(fromIssueId);
+      
+      // Get all successors of the current issue
+      const dependencies = await tx.dependency.findMany({
+        where: {
+          projectId: projectId,
+          predecessorId: fromIssueId
+        },
+        select: { successorId: true }
+      });
+      
+      for (const dep of dependencies) {
+        if (await hasPath(dep.successorId, toIssueId)) {
+          return true;
+        }
+      }
+      
+      return false;
+    };
+    
+    return await hasPath(newSuccessorId, newPredecessorId);
+  }
+
+  /**
+   * Log dependency activity to ActivityLog
+   */
+  private async logDependencyActivity(tx: any, action: string, dependency: any, userId?: string) {
+    try {
+      await tx.activityLog.create({
+        data: {
+          entityType: 'DEPENDENCY',
+          entityId: dependency.id,
+          action: action,
+          details: {
+            projectId: dependency.projectId,
+            predecessorId: dependency.predecessorId,
+            successorId: dependency.successorId,
+            type: dependency.type,
+            lag: dependency.lag
+          },
+          userId: userId,
+          timestamp: new Date()
+        }
+      });
+    } catch (error) {
+      // Log error but don't fail the main operation
+      console.error('Failed to log dependency activity:', error);
+    }
   }
 }

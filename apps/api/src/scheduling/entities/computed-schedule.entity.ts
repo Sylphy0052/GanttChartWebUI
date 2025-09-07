@@ -30,10 +30,12 @@ export class ComputedScheduleEntity {
   criticalPath: string[];
   
   conflicts: Array<{
-    type: 'resource' | 'dependency' | 'constraint';
-    taskId: string;
+    id: string;
+    type: string;
+    severity: string;
     description: string;
-    severity: 'warning' | 'error';
+    affectedTasks: string[];
+    suggestedActions: string[];
   }>;
   
   applied: boolean;

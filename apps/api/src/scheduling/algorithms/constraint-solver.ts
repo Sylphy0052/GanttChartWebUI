@@ -28,158 +28,108 @@ export interface ConstraintViolation {
 
 export class ConstraintSolver {
   private constraints: ScheduleConstraints;
-  private resourceAllocations = new Map<string, ResourceAssignment[]>(); // resourceId -> assignments
+  private resourceAllocations: Map<string, ResourceAssignment[]> = new Map();
+  private violations: ConstraintViolation[] = [];
 
   constructor(constraints: ScheduleConstraints) {
     this.constraints = constraints;
   }
 
   /**
-   * Apply constraints to schedule and detect/resolve conflicts
+   * Solve constraints for given backward pass result
    */
   solve(backwardPassResult: BackwardPassResult): {
-    resolvedSchedule: Map<string, TaskNodeWithSlack>;
-    violations: ConstraintViolation[];
+    tasks: Map<string, TaskNodeWithSlack>;
     conflicts: ConflictInfo[];
-    optimizations: string[];
+    violations: ConstraintViolation[];
   } {
     const { tasks } = backwardPassResult;
-    const resolvedTasks = new Map(tasks);
-    const violations: ConstraintViolation[] = [];
     const conflicts: ConflictInfo[] = [];
-    const optimizations: string[] = [];
+    this.violations = [];
 
-    // 1. Validate working day constraints
-    this.validateWorkingDayConstraints(resolvedTasks, violations);
+    // First pass: Apply calendar constraints
+    this.applyCalendarConstraints(tasks);
 
-    // 2. Validate mandatory date constraints
-    this.validateMandatoryDates(resolvedTasks, violations);
+    // Second pass: Apply resource constraints
+    this.applyResourceConstraints(tasks);
 
-    // 3. Validate resource constraints
-    this.validateResourceConstraints(resolvedTasks, violations);
+    // Third pass: Detect conflicts
+    this.detectSchedulingConflicts(tasks, conflicts);
 
-    // 4. Detect scheduling conflicts
-    this.detectSchedulingConflicts(resolvedTasks, conflicts);
-
-    // 5. Apply automatic conflict resolution
-    this.resolveAutomaticConflicts(resolvedTasks, violations, conflicts);
-
-    // 6. Generate optimization suggestions
-    this.generateOptimizations(resolvedTasks, optimizations);
+    // Fourth pass: Auto-resolve where possible
+    this.resolveAutomaticConflicts(tasks, this.violations, conflicts);
 
     return {
-      resolvedSchedule: resolvedTasks,
-      violations,
+      tasks,
       conflicts,
-      optimizations
+      violations: this.violations
     };
   }
 
-  private validateWorkingDayConstraints(
-    tasks: Map<string, TaskNodeWithSlack>, 
-    violations: ConstraintViolation[]
-  ): void {
-    tasks.forEach(task => {
-      const taskStartDate = this.addWorkingDays(
-        this.constraints.startDate || new Date(), 
-        task.earliestStart
-      );
-      const taskEndDate = this.addWorkingDays(
-        this.constraints.startDate || new Date(), 
-        task.earliestFinish
-      );
-
-      // Check if task spans non-working days
-      if (!this.isValidWorkingPeriod(taskStartDate, taskEndDate)) {
-        violations.push({
-          type: 'date',
-          severity: 'warning',
-          taskId: task.id,
-          description: `Task "${task.title}" spans non-working days`,
-          suggestedFix: 'Adjust task dates to working days only'
-        });
-      }
-
-      // Check holiday conflicts
-      if (this.hasHolidayConflict(taskStartDate, taskEndDate)) {
-        violations.push({
-          type: 'date',
-          severity: 'warning',
-          taskId: task.id,
-          description: `Task "${task.title}" conflicts with holidays`,
-          suggestedFix: 'Reschedule to avoid holiday periods'
-        });
-      }
-    });
-  }
-
-  private validateMandatoryDates(
-    tasks: Map<string, TaskNodeWithSlack>,
-    violations: ConstraintViolation[]
-  ): void {
-    if (!this.constraints.mandatoryDates) return;
-
-    this.constraints.mandatoryDates.forEach((mandatoryDate, taskId) => {
-      const task = tasks.get(taskId);
-      if (!task) return;
-
-      const calculatedEndDate = this.addWorkingDays(
-        this.constraints.startDate || new Date(),
-        task.earliestFinish
-      );
-
-      if (calculatedEndDate > mandatoryDate) {
-        violations.push({
-          type: 'date',
-          severity: 'error',
-          taskId: task.id,
-          description: `Task "${task.title}" cannot meet mandatory deadline`,
-          suggestedFix: 'Reduce task duration or adjust dependencies'
-        });
-      }
-    });
-  }
-
-  private validateResourceConstraints(
-    tasks: Map<string, TaskNodeWithSlack>,
-    violations: ConstraintViolation[]
-  ): void {
-    if (!this.constraints.resourceConstraints) return;
-
-    // Build resource allocation timeline
-    this.resourceAllocations.clear();
+  /**
+   * Apply working days and holiday constraints
+   */
+  private applyCalendarConstraints(tasks: Map<string, TaskNodeWithSlack>): void {
+    const { workingDays = [1, 2, 3, 4, 5], holidays = [] } = this.constraints;
     
     tasks.forEach(task => {
-      if (task.assigneeId) {
-        const startDate = this.addWorkingDays(
-          this.constraints.startDate || new Date(),
-          task.earliestStart
-        );
-        const endDate = this.addWorkingDays(
-          this.constraints.startDate || new Date(),
-          task.earliestFinish
-        );
+      // Adjust start dates to working days
+      const adjustedStartDate = this.adjustToNextWorkingDay(
+        this.addWorkingDays(new Date(), task.earliestStart),
+        workingDays,
+        holidays
+      );
 
-        const assignment: ResourceAssignment = {
+      const adjustedEndDate = this.adjustToNextWorkingDay(
+        this.addWorkingDays(adjustedStartDate, task.duration),
+        workingDays,
+        holidays
+      );
+
+      // Update task timing if adjustments were made
+      const originalStartTime = task.earliestStart;
+      task.earliestStart = this.getWorkingDays(new Date(), adjustedStartDate);
+      task.earliestFinish = this.getWorkingDays(new Date(), adjustedEndDate);
+
+      if (Math.abs(task.earliestStart - originalStartTime) > 0.1) {
+        this.violations.push({
+          type: 'date',
+          severity: 'warning',
+          taskId: task.id,
+          description: `Task scheduled adjusted to working days`,
+          suggestedFix: 'Review task scheduling constraints'
+        });
+      }
+    });
+  }
+
+  /**
+   * Apply resource capacity constraints
+   */
+  private applyResourceConstraints(tasks: Map<string, TaskNodeWithSlack>): void {
+    // Clear existing allocations
+    this.resourceAllocations.clear();
+
+    // Build resource allocations map
+    tasks.forEach(task => {
+      if (task.assigneeId) {
+        const assignments = this.resourceAllocations.get(task.assigneeId) || [];
+        assignments.push({
           taskId: task.id,
           resourceId: task.assigneeId,
-          allocation: 1.0, // Assume full allocation
-          startDate,
-          endDate
-        };
-
-        if (!this.resourceAllocations.has(task.assigneeId)) {
-          this.resourceAllocations.set(task.assigneeId, []);
-        }
-        this.resourceAllocations.get(task.assigneeId)!.push(assignment);
+          allocation: 1.0, // Full allocation by default
+          startDate: this.addWorkingDays(new Date(), task.earliestStart),
+          endDate: this.addWorkingDays(new Date(), task.earliestFinish)
+        });
+        this.resourceAllocations.set(task.assigneeId, assignments);
       }
     });
 
-    // Check for resource overallocation
+    // Check for over-allocation
     this.resourceAllocations.forEach((assignments, resourceId) => {
       const conflicts = this.detectResourceConflicts(assignments);
       conflicts.forEach(conflict => {
-        violations.push({
+        this.violations.push({
           type: 'resource',
           severity: 'error',
           taskId: conflict.taskIds.join(','),
@@ -203,10 +153,12 @@ export class ConstraintSolver {
         const requiredStart = this.calculateRequiredStart(predTask, pred.type, pred.lag);
         if (task.earliestStart < requiredStart) {
           conflicts.push({
-            type: ConflictType.DEPENDENCY,
-            taskId: task.id,
+            id: `dependency_${task.id}_${pred.id}`,
+            type: 'dependency',
+            severity: 'error',
             description: `Task starts before predecessor "${predTask.title}" completes`,
-            severity: ConflictSeverity.ERROR
+            affectedTasks: [task.id, pred.id],
+            suggestedActions: ['Adjust task dependencies', 'Review task constraints']
           });
         }
       });
@@ -224,10 +176,12 @@ export class ConstraintSolver {
 
           if (overlappingAssignments.length > 0) {
             conflicts.push({
-              type: ConflictType.RESOURCE,
-              taskId: task.id,
+              id: `resource_${task.id}_${task.assigneeId}`,
+              type: 'resource',
+              severity: 'warning',
               description: `Resource conflict with tasks: ${overlappingAssignments.map(a => a.taskId).join(', ')}`,
-              severity: ConflictSeverity.WARNING
+              affectedTasks: [task.id, ...overlappingAssignments.map(a => a.taskId)],
+              suggestedActions: ['Reschedule conflicting tasks', 'Assign different resources']
             });
           }
         }
@@ -247,103 +201,82 @@ export class ConstraintSolver {
     this.adjustForWorkingDays(tasks);
 
     // Update conflicts after resolution attempts
-    const unresolvedConflicts = conflicts.filter(conflict => 
+    const remainingConflicts = conflicts.filter(conflict => 
       !this.isConflictResolved(tasks, conflict)
     );
     
-    // Replace conflicts array with unresolved ones
-    conflicts.splice(0, conflicts.length, ...unresolvedConflicts);
+    conflicts.length = 0;
+    conflicts.push(...remainingConflicts);
   }
 
-  private generateOptimizations(
-    tasks: Map<string, TaskNodeWithSlack>,
-    optimizations: string[]
-  ): void {
-    // Resource utilization optimization
-    const resourceUtilization = this.calculateResourceUtilization();
-    const underutilizedResources = resourceUtilization.filter(ru => ru.utilization < 0.6);
-    
-    if (underutilizedResources.length > 0) {
-      optimizations.push(
-        `Consider redistributing work from ${underutilizedResources.length} underutilized resources`
+  private performResourceLeveling(tasks: Map<string, TaskNodeWithSlack>): void {
+    // Implement resource leveling algorithm
+    this.resourceAllocations.forEach((assignments, resourceId) => {
+      // Sort by earliest start
+      assignments.sort((a, b) => a.startDate.getTime() - b.startDate.getTime());
+
+      // Adjust overlapping tasks
+      for (let i = 1; i < assignments.length; i++) {
+        const current = assignments[i];
+        const previous = assignments[i - 1];
+
+        if (current.startDate < previous.endDate) {
+          // Move current task to start after previous
+          const newStartDate = previous.endDate;
+          const duration = current.endDate.getTime() - current.startDate.getTime();
+          const newEndDate = new Date(newStartDate.getTime() + duration);
+
+          current.startDate = newStartDate;
+          current.endDate = newEndDate;
+
+          // Update task node
+          const task = tasks.get(current.taskId);
+          if (task) {
+            task.earliestStart = this.getWorkingDays(new Date(), newStartDate);
+            task.earliestFinish = this.getWorkingDays(new Date(), newEndDate);
+          }
+        }
+      }
+    });
+  }
+
+  private adjustForWorkingDays(tasks: Map<string, TaskNodeWithSlack>): void {
+    // Ensure all tasks respect working day constraints
+    tasks.forEach(task => {
+      const startDate = this.addWorkingDays(new Date(), task.earliestStart);
+      const endDate = this.addWorkingDays(new Date(), task.earliestFinish);
+
+      const adjustedStart = this.adjustToNextWorkingDay(
+        startDate,
+        this.constraints.workingDays || [1, 2, 3, 4, 5],
+        this.constraints.holidays || []
       );
-    }
 
-    // Critical path optimization
-    const criticalTasks = Array.from(tasks.values()).filter(t => t.isCritical);
-    if (criticalTasks.length > tasks.size * 0.4) {
-      optimizations.push('High critical path ratio - consider parallel execution or resource addition');
-    }
+      const adjustedEnd = this.adjustToNextWorkingDay(
+        endDate,
+        this.constraints.workingDays || [1, 2, 3, 4, 5],
+        this.constraints.holidays || []
+      );
 
-    // Float utilization
-    const highFloatTasks = Array.from(tasks.values()).filter(t => t.totalFloat > 5);
-    if (highFloatTasks.length > 0) {
-      optimizations.push(`${highFloatTasks.length} tasks have significant float - opportunity for resource reallocation`);
-    }
-  }
-
-  // Helper methods
-
-  private isValidWorkingPeriod(startDate: Date, endDate: Date): boolean {
-    const current = new Date(startDate);
-    while (current <= endDate) {
-      if (!this.isWorkingDay(current)) {
-        return false;
-      }
-      current.setDate(current.getDate() + 1);
-    }
-    return true;
-  }
-
-  private hasHolidayConflict(startDate: Date, endDate: Date): boolean {
-    if (!this.constraints.holidays) return false;
-    
-    return this.constraints.holidays.some(holiday => 
-      holiday >= startDate && holiday <= endDate
-    );
-  }
-
-  private isWorkingDay(date: Date): boolean {
-    if (!this.constraints.workingDays.includes(date.getDay())) {
-      return false;
-    }
-
-    if (this.constraints.holidays) {
-      const dateStr = date.toDateString();
-      return !this.constraints.holidays.some(holiday => holiday.toDateString() === dateStr);
-    }
-
-    return true;
-  }
-
-  private addWorkingDays(startDate: Date, workingDays: number): Date {
-    const result = new Date(startDate);
-    let daysAdded = 0;
-
-    while (daysAdded < workingDays) {
-      result.setDate(result.getDate() + 1);
-      if (this.isWorkingDay(result)) {
-        daysAdded++;
-      }
-    }
-
-    return result;
+      task.earliestStart = this.getWorkingDays(new Date(), adjustedStart);
+      task.earliestFinish = this.getWorkingDays(new Date(), adjustedEnd);
+    });
   }
 
   private calculateRequiredStart(
-    predecessorTask: TaskNodeWithSlack, 
-    dependencyType: string, 
+    predecessorTask: TaskNodeWithSlack,
+    dependencyType: string,
     lag: number
   ): number {
     switch (dependencyType) {
-      case 'FS':
+      case 'FS': // Finish-to-Start
         return predecessorTask.earliestFinish + lag;
-      case 'SS':
+      case 'SS': // Start-to-Start
         return predecessorTask.earliestStart + lag;
-      case 'FF':
-        return predecessorTask.earliestFinish - lag; // Assuming successor duration known
-      case 'SF':
-        return predecessorTask.earliestStart - lag;
+      case 'FF': // Finish-to-Finish
+        return predecessorTask.earliestFinish - predecessorTask.duration + lag;
+      case 'SF': // Start-to-Finish  
+        return predecessorTask.earliestStart - predecessorTask.duration + lag;
       default:
         return predecessorTask.earliestFinish + lag;
     }
@@ -360,7 +293,7 @@ export class ConstraintSolver {
       overallocation: number;
     }> = [];
 
-    // Simple conflict detection - check for overlapping assignments
+    // Check for overlapping assignments
     for (let i = 0; i < assignments.length; i++) {
       for (let j = i + 1; j < assignments.length; j++) {
         const a1 = assignments[i];
@@ -383,111 +316,104 @@ export class ConstraintSolver {
   }
 
   private datesOverlap(start1: Date, end1: Date, start2: Date, end2: Date): boolean {
-    return start1 <= end2 && start2 <= end1;
+    return start1 < end2 && start2 < end1;
   }
 
-  private performResourceLeveling(tasks: Map<string, TaskNodeWithSlack>): void {
-    // Simple resource leveling - delay non-critical tasks when resources conflict
-    const criticalTasks = Array.from(tasks.values()).filter(t => t.isCritical);
-    const nonCriticalTasks = Array.from(tasks.values()).filter(t => !t.isCritical && t.totalFloat > 0);
-
-    // Sort non-critical tasks by float (most flexible first)
-    nonCriticalTasks.sort((a, b) => b.totalFloat - a.totalFloat);
-
-    nonCriticalTasks.forEach(task => {
-      if (task.assigneeId) {
-        const resourceAssignments = this.resourceAllocations.get(task.assigneeId) || [];
-        const conflictingAssignments = resourceAssignments.filter(a => 
-          a.taskId !== task.id && 
-          criticalTasks.some(ct => ct.id === a.taskId)
-        );
-
-        if (conflictingAssignments.length > 0) {
-          // Delay task to avoid conflict with critical tasks
-          const maxConflictEnd = Math.max(...conflictingAssignments.map(a => 
-            this.getWorkingDaysFromDate(this.constraints.startDate || new Date(), a.endDate)
-          ));
-
-          if (task.earliestStart < maxConflictEnd) {
-            const delay = Math.min(maxConflictEnd - task.earliestStart + 1, task.totalFloat);
-            task.earliestStart += delay;
-            task.earliestFinish += delay;
-          }
-        }
-      }
-    });
-  }
-
-  private adjustForWorkingDays(tasks: Map<string, TaskNodeWithSlack>): void {
-    tasks.forEach(task => {
-      const startDate = this.addWorkingDays(
-        this.constraints.startDate || new Date(),
-        task.earliestStart
-      );
-
-      if (!this.isWorkingDay(startDate)) {
-        // Move to next working day
-        const adjustedStartDate = this.getNextWorkingDay(startDate);
-        const adjustedStart = this.getWorkingDaysFromDate(
-          this.constraints.startDate || new Date(),
-          adjustedStartDate
-        );
-        
-        const adjustment = adjustedStart - task.earliestStart;
-        task.earliestStart = adjustedStart;
-        task.earliestFinish += adjustment;
-      }
-    });
-  }
-
-  private isConflictResolved(tasks: Map<string, TaskNodeWithSlack>, conflict: ConflictInfo): boolean {
-    // Simple check - implementation would need more sophisticated logic
-    const task = tasks.get(conflict.taskId);
-    return task !== undefined; // Placeholder
-  }
-
-  private calculateResourceUtilization(): Array<{ resourceId: string; utilization: number }> {
-    const utilization: Array<{ resourceId: string; utilization: number }> = [];
+  private adjustToNextWorkingDay(date: Date, workingDays: number[], holidays: Date[]): Date {
+    const result = new Date(date);
     
-    this.resourceAllocations.forEach((assignments, resourceId) => {
-      const totalWorkingDays = this.constraints.workingDays.length * 
-        (this.constraints.workingHoursPerDay / 8); // Normalize to full days
-      const totalAllocatedDays = assignments.reduce((sum, assignment) => {
-        const durationDays = this.getWorkingDaysFromDate(assignment.startDate, assignment.endDate);
-        return sum + (durationDays * assignment.allocation);
-      }, 0);
-
-      utilization.push({
-        resourceId,
-        utilization: totalAllocatedDays / totalWorkingDays
-      });
-    });
-
-    return utilization;
-  }
-
-  private getNextWorkingDay(date: Date): Date {
-    const nextDay = new Date(date);
-    nextDay.setDate(nextDay.getDate() + 1);
-    
-    while (!this.isWorkingDay(nextDay)) {
-      nextDay.setDate(nextDay.getDate() + 1);
+    while (!this.isWorkingDay(result, workingDays, holidays)) {
+      result.setDate(result.getDate() + 1);
     }
     
-    return nextDay;
+    return result;
   }
 
-  private getWorkingDaysFromDate(fromDate: Date, toDate: Date): number {
+  private isWorkingDay(date: Date, workingDays: number[], holidays: Date[]): boolean {
+    // Check if day of week is working day
+    if (!workingDays.includes(date.getDay())) {
+      return false;
+    }
+
+    // Check if date is not a holiday
+    const dateStr = date.toDateString();
+    return !holidays.some(holiday => holiday.toDateString() === dateStr);
+  }
+
+  private addWorkingDays(startDate: Date, workingDays: number): Date {
+    const result = new Date(startDate);
+    let daysAdded = 0;
+
+    while (daysAdded < workingDays) {
+      result.setDate(result.getDate() + 1);
+      if (this.isWorkingDay(
+        result,
+        this.constraints.workingDays || [1, 2, 3, 4, 5],
+        this.constraints.holidays || []
+      )) {
+        daysAdded++;
+      }
+    }
+
+    return result;
+  }
+
+  private getWorkingDays(startDate: Date, endDate: Date): number {
     let workingDays = 0;
-    const current = new Date(fromDate);
-    
-    while (current < toDate) {
-      if (this.isWorkingDay(current)) {
+    const current = new Date(startDate);
+
+    while (current <= endDate) {
+      if (this.isWorkingDay(
+        current,
+        this.constraints.workingDays || [1, 2, 3, 4, 5],
+        this.constraints.holidays || []
+      )) {
         workingDays++;
       }
       current.setDate(current.getDate() + 1);
     }
-    
+
     return workingDays;
+  }
+
+  private isConflictResolved(tasks: Map<string, TaskNodeWithSlack>, conflict: ConflictInfo): boolean {
+    // Simple check - implementation would need more sophisticated logic
+    const affectedTasks = conflict.affectedTasks || [];
+    return affectedTasks.every(taskId => {
+      const task = tasks.get(taskId);
+      return task !== undefined;
+    });
+  }
+
+  /**
+   * Get constraint solver statistics
+   */
+  getStatistics(): {
+    totalViolations: number;
+    errorViolations: number;
+    warningViolations: number;
+    resourceConflicts: number;
+    dateViolations: number;
+  } {
+    const errorViolations = this.violations.filter(v => v.severity === 'error').length;
+    const warningViolations = this.violations.filter(v => v.severity === 'warning').length;
+    const resourceConflicts = this.violations.filter(v => v.type === 'resource').length;
+    const dateViolations = this.violations.filter(v => v.type === 'date').length;
+
+    return {
+      totalViolations: this.violations.length,
+      errorViolations,
+      warningViolations,
+      resourceConflicts,
+      dateViolations
+    };
+  }
+
+  /**
+   * Reset solver state
+   */
+  reset(): void {
+    this.resourceAllocations.clear();
+    this.violations = [];
   }
 }
