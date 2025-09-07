@@ -1,0 +1,349 @@
+import { Test, TestingModule } from '@nestjs/testing';
+import { BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { ProjectsService } from './projects.service';
+import { PrismaService } from '../prisma/prisma.service';
+import { CreateProjectDto } from './dto/create-project.dto';
+import { UpdateProjectDto } from './dto/update-project.dto';
+
+// Mock PrismaService at the module level
+jest.mock('../prisma/prisma.service');
+
+describe('ProjectsService', () => {
+  let service: ProjectsService;
+  let prismaService: jest.Mocked<PrismaService>;
+
+  beforeEach(async () => {
+    const mockPrismaService = {
+      project: {
+        create: jest.fn(),
+        findMany: jest.fn(),
+        findFirst: jest.fn(),
+        update: jest.fn(),
+        delete: jest.fn(),
+      },
+      projectMember: {
+        findFirst: jest.fn(),
+      },
+      issue: {
+        findMany: jest.fn(),
+        findFirst: jest.fn(),
+        findUnique: jest.fn(),
+        update: jest.fn(),
+      },
+      dependency: {
+        findMany: jest.fn(),
+      },
+      wBSNode: {
+        findMany: jest.fn(),
+      },
+    };
+
+    const module: TestingModule = await Test.createTestingModule({
+      providers: [
+        ProjectsService,
+        {
+          provide: PrismaService,
+          useValue: mockPrismaService,
+        },
+      ],
+    }).compile();
+
+    service = module.get<ProjectsService>(ProjectsService);
+    prismaService = module.get<PrismaService>(PrismaService) as jest.Mocked<PrismaService>;
+  });
+
+  afterEach(() => {
+    jest.clearAllMocks();
+  });
+
+  it('should be defined', () => {
+    expect(service).toBeDefined();
+    expect(prismaService).toBeDefined();
+  });
+
+  describe('create', () => {
+    const createProjectDto: CreateProjectDto = {
+      name: 'Test Project',
+      visibility: 'private',
+    };
+    const userId = 'user-123';
+
+    it('should create a project successfully', async () => {
+      const mockProject = {
+        id: 'project-123',
+        name: 'Test Project',
+        visibility: 'private',
+        schedulingEnabled: true,
+        createdAt: new Date('2025-01-01'),
+        updatedAt: new Date('2025-01-01'),
+        members: [{
+          userId: 'user-123',
+          role: 'owner',
+          user: {
+            id: 'user-123',
+            name: 'John Doe',
+            email: 'john@example.com'
+          }
+        }],
+        _count: {
+          issues: 0
+        }
+      };
+
+      prismaService.project.create.mockResolvedValue(mockProject as any);
+
+      const result = await service.create(createProjectDto, userId);
+
+      expect(result).toEqual({
+        id: 'project-123',
+        name: 'Test Project',
+        visibility: 'private',
+        schedulingEnabled: true,
+        createdAt: '2025-01-01T00:00:00.000Z',
+        updatedAt: '2025-01-01T00:00:00.000Z',
+        members: [{
+          userId: 'user-123',
+          role: 'owner',
+          user: {
+            id: 'user-123',
+            name: 'John Doe',
+            email: 'john@example.com'
+          }
+        }],
+        issuesCount: 0
+      });
+
+      expect(prismaService.project.create).toHaveBeenCalledWith({
+        data: {
+          ...createProjectDto,
+          members: {
+            create: {
+              userId: userId,
+              role: 'owner'
+            }
+          }
+        },
+        include: {
+          members: {
+            include: {
+              user: {
+                select: {
+                  id: true,
+                  name: true,
+                  email: true
+                }
+              }
+            }
+          },
+          _count: {
+            select: {
+              issues: true
+            }
+          }
+        }
+      });
+    });
+
+    it('should throw BadRequestException when creation fails', async () => {
+      const error = new Error('Database connection failed');
+      prismaService.project.create.mockRejectedValue(error);
+
+      await expect(service.create(createProjectDto, userId))
+        .rejects
+        .toThrow(BadRequestException);
+    });
+  });
+
+  describe('findOneWithAccess', () => {
+    const projectId = 'project-123';
+    const userId = 'user-123';
+
+    it('should return project when user has access', async () => {
+      const mockProject = {
+        id: 'project-123',
+        name: 'Test Project',
+        visibility: 'private',
+        schedulingEnabled: true,
+        createdAt: new Date('2025-01-01'),
+        updatedAt: new Date('2025-01-01'),
+        members: [{
+          userId: 'user-123',
+          role: 'owner',
+          user: {
+            id: 'user-123',
+            name: 'John Doe',
+            email: 'john@example.com'
+          }
+        }],
+        _count: {
+          issues: 5
+        }
+      };
+
+      prismaService.project.findFirst.mockResolvedValue(mockProject as any);
+
+      const result = await service.findOneWithAccess(projectId, userId);
+
+      expect(result.id).toBe('project-123');
+      expect(result.name).toBe('Test Project');
+      expect(result.issuesCount).toBe(5);
+    });
+
+    it('should throw NotFoundException when project not found', async () => {
+      prismaService.project.findFirst.mockResolvedValue(null);
+
+      await expect(service.findOneWithAccess(projectId, userId))
+        .rejects
+        .toThrow(NotFoundException);
+    });
+  });
+
+  describe('findAllForUser', () => {
+    const userId = 'user-123';
+
+    it('should return all projects for user', async () => {
+      const mockProjects = [{
+        id: 'project-123',
+        name: 'Test Project',
+        visibility: 'private',
+        schedulingEnabled: true,
+        createdAt: new Date('2025-01-01'),
+        updatedAt: new Date('2025-01-01'),
+        members: [{
+          userId: 'user-123',
+          role: 'owner',
+          user: {
+            id: 'user-123',
+            name: 'John Doe',
+            email: 'john@example.com'
+          }
+        }],
+        _count: {
+          issues: 3
+        }
+      }];
+
+      prismaService.project.findMany.mockResolvedValue(mockProjects as any);
+
+      const result = await service.findAllForUser(userId);
+
+      expect(result).toHaveLength(1);
+      expect(result[0].id).toBe('project-123');
+      expect(result[0].issuesCount).toBe(3);
+    });
+
+    it('should return empty array when user has no projects', async () => {
+      prismaService.project.findMany.mockResolvedValue([]);
+
+      const result = await service.findAllForUser(userId);
+
+      expect(result).toEqual([]);
+    });
+  });
+
+  describe('updateWithAccess', () => {
+    const projectId = 'project-123';
+    const userId = 'user-123';
+    const updateProjectDto: UpdateProjectDto = {
+      name: 'Updated Project Name'
+    };
+
+    it('should update project when user has access', async () => {
+      const mockExistingProject = {
+        id: 'project-123',
+        name: 'Test Project',
+        visibility: 'private',
+        schedulingEnabled: true,
+        createdAt: '2025-01-01T00:00:00.000Z',
+        updatedAt: '2025-01-01T00:00:00.000Z',
+        members: [],
+        issuesCount: 0
+      };
+      
+      const mockUpdatedProject = {
+        id: 'project-123',
+        name: 'Updated Project Name',
+        visibility: 'private',
+        schedulingEnabled: true,
+        createdAt: new Date('2025-01-01'),
+        updatedAt: new Date('2025-01-02'),
+        members: [],
+        _count: { issues: 0 }
+      };
+
+      // Mock the access check
+      jest.spyOn(service, 'findOneWithAccess').mockResolvedValue(mockExistingProject);
+      prismaService.project.update.mockResolvedValue(mockUpdatedProject as any);
+
+      const result = await service.updateWithAccess(projectId, updateProjectDto, userId);
+
+      expect(result.name).toBe('Updated Project Name');
+      expect(service.findOneWithAccess).toHaveBeenCalledWith(projectId, userId);
+    });
+  });
+
+  describe('assignUserToIssue', () => {
+    const projectId = 'project-123';
+    const userId = 'user-123';
+    const issueId = 'issue-123';
+    const requestingUserId = 'requesting-user-123';
+
+    it('should assign user to issue successfully', async () => {
+      const mockProject = {
+        id: 'project-123',
+        name: 'Test Project',
+        visibility: 'private',
+        schedulingEnabled: true,
+        createdAt: '2025-01-01T00:00:00.000Z',
+        updatedAt: '2025-01-01T00:00:00.000Z',
+        members: [],
+        issuesCount: 0
+      };
+
+      const mockIssue = {
+        id: 'issue-123',
+        projectId: 'project-123',
+        title: 'Test Issue'
+      };
+
+      const mockProjectMember = {
+        projectId: 'project-123',
+        userId: 'user-123',
+        isActive: true
+      };
+
+      jest.spyOn(service, 'findOneWithAccess').mockResolvedValue(mockProject);
+      prismaService.issue.findFirst.mockResolvedValue(mockIssue as any);
+      prismaService.projectMember.findFirst.mockResolvedValue(mockProjectMember as any);
+      prismaService.issue.update.mockResolvedValue({ ...mockIssue, assigneeId: userId } as any);
+
+      await service.assignUserToIssue(projectId, userId, issueId, requestingUserId);
+
+      expect(service.findOneWithAccess).toHaveBeenCalledWith(projectId, requestingUserId);
+      expect(prismaService.issue.update).toHaveBeenCalledWith({
+        where: { id: issueId },
+        data: { assigneeId: userId }
+      });
+    });
+
+    it('should throw NotFoundException when issue not found', async () => {
+      const mockProject = {
+        id: 'project-123',
+        name: 'Test Project',
+        visibility: 'private',
+        schedulingEnabled: true,
+        createdAt: '2025-01-01T00:00:00.000Z',
+        updatedAt: '2025-01-01T00:00:00.000Z',
+        members: [],
+        issuesCount: 0
+      };
+
+      jest.spyOn(service, 'findOneWithAccess').mockResolvedValue(mockProject);
+      prismaService.issue.findFirst.mockResolvedValue(null);
+
+      await expect(service.assignUserToIssue(projectId, userId, issueId, requestingUserId))
+        .rejects
+        .toThrow(NotFoundException);
+    });
+  });
+});
