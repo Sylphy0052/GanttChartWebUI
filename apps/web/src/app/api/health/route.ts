@@ -21,7 +21,8 @@ interface HealthResponse {
 let startTime = Date.now();
 
 export async function GET(): Promise<NextResponse<HealthResponse>> {
-  const apiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+  // Use internal API URL for server-side calls in Docker
+  const apiUrl = process.env.API_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
   let apiStatus = 'unknown';
   let apiError: string | undefined;
 
