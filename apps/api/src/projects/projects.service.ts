@@ -7,7 +7,9 @@ import { WBSTreeResponseDto, WBSTreeQueryDto, GanttDataResponseDto, GanttDataQue
 
 @Injectable()
 export class ProjectsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+  ) {}
 
   async create(createProjectDto: CreateProjectDto, userId: string): Promise<ProjectResponseDto> {
     try {

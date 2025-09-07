@@ -3,6 +3,8 @@ import { ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
+import { SecurityExceptionFilter } from './common/filters/security-exception.filter';
+import { PerformanceMonitoringInterceptor } from './common/interceptors/performance-monitoring.interceptor';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -63,6 +65,12 @@ async function bootstrap() {
     transform: true,
     forbidNonWhitelisted: true,
   }));
+
+  // グローバルセキュリティ例外フィルター
+  app.useGlobalFilters(new SecurityExceptionFilter());
+
+  // グローバルパフォーマンス監視インターセプター
+  app.useGlobalInterceptors(new PerformanceMonitoringInterceptor());
 
   // Swagger設定
   if (process.env.NODE_ENV !== 'production') {
