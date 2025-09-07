@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --port 3001",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
@@ -11,12 +11,27 @@
     "e2e": "playwright test",
     "e2e:ui": "playwright test --ui",
     "e2e:debug": "playwright test --debug",
-    "e2e:critical": "playwright test --grep @critical"
+    "e2e:critical": "playwright test --grep @critical",
+    "e2e:cross-browser": "playwright test --project=chromium-desktop --project=firefox-desktop --project=webkit-desktop --project=edge-desktop",
+    "e2e:responsive": "playwright test --project=mobile-chrome --project=mobile-safari --project=tablet-chrome",
+    "e2e:performance": "playwright test --project=performance-tests",
+    "e2e:accessibility": "playwright test --project=accessibility-tests",
+    "e2e:full": "playwright test --project=chromium-desktop --project=firefox-desktop --project=webkit-desktop --project=edge-desktop --project=mobile-chrome --project=tablet-chrome --project=performance-tests --project=accessibility-tests",
+    "e2e:load-test": "playwright test --project=load-testing --grep @load-test",
+    "e2e:load-test:large-dataset": "playwright test --project=load-testing large-dataset-performance.spec.ts",
+    "e2e:load-test:concurrent": "playwright test --project=concurrency-testing concurrent-users.spec.ts",
+    "e2e:load-test:memory": "playwright test --project=memory-leak-testing memory-leak-detection.spec.ts",
+    "e2e:load-test:database": "playwright test --project=load-testing database-performance.spec.ts",
+    "e2e:load-test:api": "playwright test --project=load-testing api-load-testing.spec.ts",
+    "e2e:load-test:frontend": "playwright test --project=load-testing frontend-performance-profiling.spec.ts",
+    "e2e:load-test:reports": "playwright test --project=load-testing automated-performance-reports.spec.ts",
+    "e2e:load-test:all": "playwright test --project=load-testing --project=concurrency-testing --project=memory-leak-testing"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
     "@dnd-kit/sortable": "^10.0.0",
     "@dnd-kit/utilities": "^3.2.2",
+    "@headlessui/react": "^2.2.7",
     "@heroicons/react": "^2.2.0",
     "@tanstack/react-query": "^5.0.0",
     "axios": "^1.5.0",
@@ -26,15 +41,18 @@
     "d3-time": "^3.1.0",
     "date-fns": "^2.30.0",
     "date-fns-tz": "^2.0.0",
-    "next": "14.0.0",
+    "lucide-react": "^0.542.0",
+    "next": "^14.2.32",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
+    "react-hot-toast": "^2.6.0",
     "react-virtualized": "^9.22.5",
     "react-window": "^2.0.2",
     "tailwind-merge": "^3.3.1",
     "zustand": "^4.4.0"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.8.2",
     "@playwright/test": "^1.40.0",
     "@types/d3-array": "^3.2.1",
     "@types/d3-scale": "^4.0.9",
@@ -45,6 +63,7 @@
     "@types/react-virtualized": "^9.21.22",
     "@typescript-eslint/eslint-plugin": "^8.42.0",
     "@typescript-eslint/parser": "^8.42.0",
+    "allure-playwright": "^2.15.1",
     "autoprefixer": "^10.4.14",
     "eslint": "^8.42.0",
     "eslint-config-next": "14.0.0",
@@ -52,6 +71,6 @@
     "postcss": "^8.4.24",
     "prettier": "^3.6.2",
     "tailwindcss": "^3.3.0",
-    "typescript": "^5.1.3"
+    "typescript": "^5.9.2"
   }
 }
