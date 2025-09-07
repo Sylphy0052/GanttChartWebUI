@@ -2,10 +2,43 @@
  * T016 AC6: Telemetry Batch Entity
  * 
  * Database entity for storing telemetry batch data with efficient querying and indexing
+ * TEMPORARY: TypeORM imports commented out for Docker startup fix - needs Prisma migration
  */
 
-import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn, UpdateDateColumn, Index } from 'typeorm'
+// TEMP: TypeORM imports commented out for Prisma compatibility
+// import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn, UpdateDateColumn, Index } from 'typeorm'
 
+// TEMP: Entity class commented out - needs migration to Prisma schema
+// @Entity('telemetry_batches')
+// @Index(['sessionId', 'createdAt'])
+// @Index(['userId', 'createdAt'])
+// @Index(['projectId', 'createdAt'])
+// @Index(['status', 'priority', 'createdAt'])
+export class TelemetryBatch {
+  // TEMP: Properties temporarily defined as interface until Prisma migration
+  id: string
+  batchId: string
+  sessionId: string
+  userId?: string
+  projectId?: string
+  data: string
+  size: number
+  priority: 'low' | 'medium' | 'high' | 'critical'
+  status: 'queued' | 'processing' | 'completed' | 'failed'
+  queuedAt: Date
+  processedAt?: Date
+  retryCount: number
+  maxRetries: number
+  errorMessage?: string
+  processingMetrics?: any
+  createdAt: Date
+  updatedAt: Date
+
+  // TODO: Migrate to Prisma schema and regenerate client types
+}
+
+// Original TypeORM implementation - TEMP COMMENTED OUT
+/*
 @Entity('telemetry_batches')
 @Index(['sessionId', 'createdAt'])
 @Index(['userId', 'createdAt'])
@@ -77,3 +110,4 @@ export class TelemetryBatch {
   @UpdateDateColumn()
   updatedAt: Date
 }
+*/
