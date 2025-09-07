@@ -1,38 +1,8 @@
 {
-  "phase": "scaffold",
-  "current_milestone": "M1",
-  "current_task": {
-    "id": "nestjs-init",
-    "title": "NestJSプロジェクト初期化",
-    "description": "バックエンドの基本構造とモジュール骨格の作成",
-    "milestone": "M1", 
-    "estimated_hours": 1.5,
-    "status": "in_progress",
-    "dependencies": ["docker-base"],
-    "files": ["backend/src/main.ts", "backend/package.json", "backend/src/app.module.ts"],
-    "started_at": "2025-09-07T02:00:00Z"
-  },
+  "phase": "implement",
+  "current_milestone": "M2",
+  "current_task": null,
   "next_tasks": [
-    {
-      "id": "nextjs-init",
-      "title": "Next.jsプロジェクト初期化",
-      "description": "フロントエンドの基本構造とページ骨格の作成",
-      "milestone": "M1",
-      "estimated_hours": 1.5,
-      "status": "ready", 
-      "dependencies": ["docker-base"],
-      "files": ["frontend/package.json", "frontend/pages/index.tsx", "frontend/next.config.js"]
-    },
-    {
-      "id": "env-config",
-      "title": "環境変数設定",
-      "description": ".envファイルとDocker環境変数の整備",
-      "milestone": "M0",
-      "estimated_hours": 0.5,
-      "status": "ready",
-      "dependencies": ["docker-base"],
-      "files": [".env", ".env.example"]
-    }
   ],
   "completed_tasks": [
     {
@@ -58,23 +28,119 @@
       "files": ["backend/prisma/schema.prisma"],
       "started_at": "2025-09-07T01:00:00Z",
       "completed_at": "2025-09-07T01:30:00Z"
+    },
+    {
+      "id": "nestjs-init",
+      "title": "NestJSプロジェクト初期化",
+      "description": "バックエンドの基本構造とモジュール骨格の作成",
+      "milestone": "M1", 
+      "estimated_hours": 1.5,
+      "status": "completed",
+      "dependencies": ["docker-base"],
+      "files": ["backend/src/main.ts", "backend/package.json", "backend/src/app.module.ts"],
+      "started_at": "2025-09-07T02:00:00Z",
+      "completed_at": "2025-09-07T02:30:00Z"
+    },
+    {
+      "id": "nextjs-init",
+      "title": "Next.jsプロジェクト初期化",
+      "description": "フロントエンドの基本構造とページ骨格の作成",
+      "milestone": "M1",
+      "estimated_hours": 1.5,
+      "status": "completed", 
+      "dependencies": ["docker-base"],
+      "files": ["frontend/package.json", "frontend/app/page.tsx", "frontend/next.config.js"],
+      "started_at": "2025-09-07T03:00:00Z",
+      "completed_at": "2025-09-07T03:30:00Z"
+    },
+    {
+      "id": "env-config",
+      "title": "環境変数設定",
+      "description": ".envファイルとDocker環境変数の整備",
+      "milestone": "M0",
+      "estimated_hours": 0.5,
+      "status": "completed",
+      "dependencies": ["docker-base"],
+      "files": [".env", ".env.example"],
+      "started_at": "2025-09-07T04:00:00Z",
+      "completed_at": "2025-09-07T04:15:00Z"
+    },
+    {
+      "id": "m2-prisma-setup",
+      "title": "Prismaクライアント設定とDB接続確立",
+      "description": "package.json依存関係追加、Prismaクライアント生成、DATABASE_URL設定、PostgreSQL接続確認",
+      "milestone": "M2",
+      "estimated_hours": 1.5,
+      "status": "completed",
+      "dependencies": [],
+      "files": ["backend/package.json", ".env", "backend/src/database/prisma.service.ts"],
+      "started_at": "2025-09-07T05:00:00Z",
+      "completed_at": "2025-09-07T05:30:00Z"
+    },
+    {
+      "id": "m2-migration-deploy",
+      "title": "初回マイグレーション実行とスキーマ適用",
+      "description": "Prisma migrate initでマイグレーション生成、Docker環境での実行、7つのモデルテーブル作成確認",
+      "milestone": "M2",
+      "estimated_hours": 1.0,
+      "status": "completed",
+      "dependencies": ["m2-prisma-setup"],
+      "files": ["backend/prisma/migrations/"],
+      "started_at": "2025-09-07T06:00:00Z",
+      "completed_at": "2025-09-07T06:30:00Z"
+    },
+    {
+      "id": "m2-nestjs-prisma-integration",
+      "title": "NestJSアプリケーションとPrismaサービス統合",
+      "description": "PrismaServiceプロバイダー設定、DatabaseModule作成、依存性注入、ヘルスチェック追加",
+      "milestone": "M2",
+      "estimated_hours": 1.5,
+      "status": "completed",
+      "dependencies": ["m2-migration-deploy"],
+      "files": ["backend/src/database/database.module.ts", "backend/src/app.module.ts", "backend/src/health/health.controller.ts"],
+      "started_at": "2025-09-07T07:00:00Z",
+      "completed_at": "2025-09-07T07:30:00Z"
+    },
+    {
+      "id": "m2-project-crud-api",
+      "title": "Projectモデルの基本CRUD API実装",
+      "description": "ProjectController/Service/DTO実装、バリデーション、エラーハンドリング、論理削除対応",
+      "milestone": "M2",
+      "estimated_hours": 2.0,
+      "status": "completed",
+      "dependencies": ["m2-nestjs-prisma-integration"],
+      "files": ["backend/src/projects/projects.controller.ts", "backend/src/projects/projects.service.ts", "backend/src/projects/dto/", "backend/src/common/filters/"],
+      "started_at": "2025-09-07T08:00:00Z",
+      "completed_at": "2025-09-07T10:00:00Z"
+    },
+    {
+      "id": "m2-api-test-security",
+      "title": "API基盤テストとセキュリティ基盤実装",
+      "description": "単体・統合テスト実装、基本認証ミドルウェア、リクエスト制限設定",
+      "milestone": "M2",
+      "estimated_hours": 2.0,
+      "status": "completed",
+      "dependencies": ["m2-project-crud-api"],
+      "files": ["backend/src/projects/projects.service.spec.ts", "backend/src/projects/projects.controller.spec.ts", "backend/src/auth/auth.middleware.ts", "backend/src/common/guards/"],
+      "started_at": "2025-09-07T10:00:00Z",
+      "completed_at": "2025-09-07T12:00:00Z"
     }
   ],
   "milestones": {
     "M0": {
       "name": "Docker環境構築",
       "description": "compose, backend/frontend Dockerfile, nginx.conf",
-      "status": "in_progress"
+      "status": "completed"
     },
     "M1": {
-      "name": "基盤整備",
+      "name": "基盤整備", 
       "description": "プロジェクト初期化とスキーマ定義",
-      "status": "pending"
+      "status": "completed"
     },
     "M2": {
       "name": "データ層 & API骨格",
       "description": "Prisma設定とCRUD API基盤",
-      "status": "pending"
+      "status": "completed"
     },
     "M3": {
       "name": "プロジェクト管理機能",
@@ -106,5 +172,5 @@
     "initial_render_ms_p95": 1500,
     "drag_latency_ms_p95": 100
   },
-  "updated_at": "2025-09-07T00:00:00Z"
+  "updated_at": "2025-09-07T12:00:00Z"
 }
