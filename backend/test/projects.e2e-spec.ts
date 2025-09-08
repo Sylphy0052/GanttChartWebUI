@@ -195,7 +195,7 @@ describe('プロジェクト管理 E2E テスト', () => {
 
       // 削除されていないプロジェクトのみが返されることを確認
       response.body.forEach((project: any) => {
-        expect(project.deleted_at).toBeNull();
+        expect(project.is_deleted).toBe(false);
       });
     });
 
@@ -204,7 +204,7 @@ describe('プロジェクト管理 E2E テスト', () => {
       for (const project of testProjects) {
         await testHelper.prisma.project.update({
           where: { id: project.id },
-          data: { deleted_at: new Date() },
+          data: { is_deleted: true },
         });
       }
 
@@ -266,7 +266,7 @@ describe('プロジェクト管理 E2E テスト', () => {
       // プロジェクトを論理削除
       await testHelper.prisma.project.update({
         where: { id: testProject.id },
-        data: { deleted_at: new Date() },
+        data: { is_deleted: true },
       });
 
       await request(app.getHttpServer())
@@ -364,7 +364,7 @@ describe('プロジェクト管理 E2E テスト', () => {
     it('削除済みプロジェクトの更新で404エラー', async () => {
       await testHelper.prisma.project.update({
         where: { id: testProject.id },
-        data: { deleted_at: new Date() },
+        data: { is_deleted: true },
       });
 
       await request(app.getHttpServer())
@@ -394,8 +394,7 @@ describe('プロジェクト管理 E2E テスト', () => {
       });
 
       expect(deletedProject).not.toBeNull();
-      expect(deletedProject?.deleted_at).not.toBeNull();
-      expect(deletedProject?.deleted_at).toBeInstanceOf(Date);
+      expect(deletedProject?.is_deleted).toBe(true);
     });
 
     it('削除後はプロジェクト一覧に表示されない', async () => {
@@ -440,7 +439,7 @@ describe('プロジェクト管理 E2E テスト', () => {
       // 手動で削除済みに設定
       await testHelper.prisma.project.update({
         where: { id: testProject.id },
-        data: { deleted_at: new Date() },
+        data: { is_deleted: true },
       });
 
       await request(app.getHttpServer())

@@ -268,7 +268,7 @@ describe('E2Eテストスイート - 統合実行', () => {
         .expect(204);
 
       // タスクも論理削除されているか確認
-      const deletedTask = await testHelper.prisma.task.findUnique({
+      const deletedTask = await testHelper.prisma.issue.findUnique({
         where: { id: task.id },
       });
       

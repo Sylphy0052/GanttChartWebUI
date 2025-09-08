@@ -161,7 +161,7 @@ describe('認証・権限管理 E2E テスト', () => {
         const deletedProject = await testHelper.prisma.project.findUnique({
           where: { id: project.id },
         });
-        expect(deletedProject?.deleted_at).not.toBeNull();
+        expect(deletedProject?.is_deleted).toBe(true);
       });
 
       it('POST /projects/:id/set-password - editor権限でアクセス可能', async () => {

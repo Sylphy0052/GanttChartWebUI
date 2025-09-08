@@ -73,7 +73,7 @@ export class TestHelper {
    */
   async cleanupDatabase(): Promise<void> {
     // テスト後のクリーンアップ
-    const tableNames = ['Task', 'Project', 'GlobalSettings'];
+    const tableNames = ['Issue', 'Project', 'GlobalSettings'];
     
     for (const tableName of tableNames) {
       try {
@@ -127,10 +127,7 @@ export class TestHelper {
   async createTestProject(overrides: Partial<any> = {}): Promise<any> {
     const defaultProject = {
       name: 'Test Project',
-      description: 'A test project for E2E testing',
-      start_date: new Date('2024-01-01'),
-      end_date: new Date('2024-12-31'),
-      status: 'active',
+      description_md: 'A test project for E2E testing',
       shared_password_hash: null,
       ...overrides,
     };
@@ -141,25 +138,39 @@ export class TestHelper {
   }
 
   /**
-   * テストデータ生成: タスク
+   * テストデータ生成: Issue
    */
-  async createTestTask(projectId: string, overrides: Partial<any> = {}): Promise<any> {
-    const defaultTask = {
-      project_id: projectId,
-      name: 'Test Task',
-      description: 'A test task for E2E testing',
+  async createTestIssue(projectId: string, overrides: Partial<any> = {}): Promise<any> {
+    // パラメータからproject_idを除外し、正しい形式を生成
+    const { project_id, parent_id, ...cleanOverrides } = overrides;
+    
+    const defaultIssue = {
+      project: {
+        connect: { id: projectId }
+      },
+      title: 'Test Issue',
+      description_md: 'A test issue for E2E testing',
+      status: 'open' as const,
+      progress_pct: 0,
       start_date: new Date('2024-06-01'),
       end_date: new Date('2024-06-15'),
-      status: 'pending',
-      progress: 0,
       assignee: null,
-      dependencies: [],
-      ...overrides,
+      is_blocked: false,
+      sort_order: 0,
+      labels: [],
+      effort_hours: null,
+      ...(parent_id && { parent: { connect: { id: parent_id } } }),
+      ...cleanOverrides,
     };
 
-    return await this.prisma.task.create({
-      data: defaultTask,
+    return await this.prisma.issue.create({
+      data: defaultIssue,
     });
+  }
+
+  // 後方互換性のため、createTestTaskメソッドも提供
+  async createTestTask(projectId: string, overrides: Partial<any> = {}): Promise<any> {
+    return this.createTestIssue(projectId, overrides);
   }
 
   /**
@@ -169,19 +180,16 @@ export class TestHelper {
     const testData = {
       project: {
         name: 'Imported Project',
-        description: 'Test project from import',
-        start_date: '2024-01-01',
-        end_date: '2024-12-31',
-        status: 'active',
+        description_md: 'Test project from import',
       },
-      tasks: [
+      issues: [
         {
-          name: 'Imported Task 1',
-          description: 'First imported task',
+          title: 'Imported Issue 1',
+          description_md: 'First imported issue',
           start_date: '2024-01-01',
           end_date: '2024-01-15',
-          status: 'pending',
-          progress: 0,
+          status: 'open',
+          progress_pct: 0,
         },
       ],
     };
@@ -197,13 +205,17 @@ export class TestHelper {
   expectValidProject(project: any): void {
     expect(project).toHaveProperty('id');
     expect(project).toHaveProperty('name');
-    expect(project).toHaveProperty('description');
-    expect(project).toHaveProperty('start_date');
-    expect(project).toHaveProperty('end_date');
-    expect(project).toHaveProperty('status');
+    expect(project).toHaveProperty('description_md');
     expect(project).toHaveProperty('created_at');
     expect(project).toHaveProperty('updated_at');
-    expect(project.deleted_at).toBeNull();
+    expect(project.is_deleted).toBe(false);
+  }
+
+  /**
+   * UUID形式の検証ヘルパー
+   */
+  expectValidUuid(uuid: string): void {
+    expect(uuid).toMatch(/^c[a-z0-9]{24}$/); // CUID format
   }
 
   /**
