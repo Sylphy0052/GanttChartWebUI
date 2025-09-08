@@ -2,12 +2,14 @@ import { Injectable, Logger, NotFoundException, ConflictException, BadRequestExc
 import { PrismaService } from '../database/prisma.service';
 import { ChangeLogService } from '../changelog/changelog.service';
 import { UploadsService } from '../uploads/uploads.service';
+import { NotificationGateway } from '../websocket/websocket.gateway';
+import { IssueNotificationData } from '../websocket/interfaces/websocket-notification.interface';
 import { CreateIssueDto, UpdateIssueDto, IssueResponseDto } from './dto';
 import { Issue } from '@prisma/client';
 import { plainToClass } from 'class-transformer';
 
 /**
- * IssuesService - Issue管理のビジネスロジック（ChangeLog統合版）
+ * IssuesService - Issue管理のビジネスロジック（ChangeLog・WebSocket通知統合版）
  * 
  * 機能:
  * - Issue基本CRUD操作（create, findAll, findOne, update, remove）
@@ -15,6 +17,7 @@ import { plainToClass } from 'class-transformer';
  * - 階層構造（parent-child関係）の処理
  * - レスポンスDTO変換
  * - ChangeLog自動記録（作成・更新・削除時）
+ * - WebSocket通知自動配信（作成・更新・削除時）
  * - ImagePath自動クリーンアップ（削除時）
  */
 @Injectable()
@@ -26,6 +29,7 @@ export class IssuesService {
     private readonly changeLogService: ChangeLogService,
     @Inject(forwardRef(() => UploadsService))
     private readonly uploadsService: UploadsService,
+    private readonly notificationGateway: NotificationGateway,
   ) {}
 
   /**
@@ -104,6 +108,31 @@ export class IssuesService {
       } catch (changeLogError) {
         this.logger.warn(`Failed to record change log for issue creation ${issue.id}: ${changeLogError.message}`);
         // ChangeLog記録エラーは Issue作成を阻害しない
+      }
+
+      // WebSocket通知配信 - Issue作成
+      try {
+        const issueNotificationData: IssueNotificationData = {
+          action: 'create',
+          issue: {
+            id: issue.id,
+            title: issue.title,
+            description_md: issue.description_md,
+            assignee: issue.assignee,
+            status: issue.status,
+            start_date: issue.start_date,
+            end_date: issue.end_date,
+            progress_pct: issue.progress_pct,
+            project_id: issue.project_id,
+            parent_id: issue.parent_id,
+          },
+          author: createIssueDto.assignee || 'system',
+        };
+        
+        await this.notificationGateway.notifyIssueChanged(issueNotificationData);
+      } catch (notificationError) {
+        this.logger.warn(`Failed to send WebSocket notification for issue creation ${issue.id}: ${notificationError.message}`);
+        // WebSocket通知エラーは Issue作成を阻害しない
       }
 
       this.logger.log(`Issue created successfully: ${issue.id}`);
@@ -325,6 +354,40 @@ export class IssuesService {
         // ChangeLog記録エラーは Issue更新を阻害しない
       }
 
+      // WebSocket通知配信 - Issue更新（変更があった場合のみ）
+      try {
+        let hasChanges = false;
+        Object.keys(updateData).forEach(key => {
+          if (key !== 'version' && previousValues[key] !== updateData[key]) {
+            hasChanges = true;
+          }
+        });
+
+        if (hasChanges) {
+          const issueNotificationData: IssueNotificationData = {
+            action: 'update',
+            issue: {
+              id: updatedIssue.id,
+              title: updatedIssue.title,
+              description_md: updatedIssue.description_md,
+              assignee: updatedIssue.assignee,
+              status: updatedIssue.status,
+              start_date: updatedIssue.start_date,
+              end_date: updatedIssue.end_date,
+              progress_pct: updatedIssue.progress_pct,
+              project_id: updatedIssue.project_id,
+              parent_id: updatedIssue.parent_id,
+            },
+            author: updateIssueDto.assignee || existingIssue.assignee || 'system',
+          };
+          
+          await this.notificationGateway.notifyIssueChanged(issueNotificationData);
+        }
+      } catch (notificationError) {
+        this.logger.warn(`Failed to send WebSocket notification for issue update ${id}: ${notificationError.message}`);
+        // WebSocket通知エラーは Issue更新を阻害しない
+      }
+
       this.logger.log(`Issue updated successfully: ${updatedIssue.id}`);
       return this.toResponseDto(updatedIssue);
     } catch (error) {
@@ -338,7 +401,7 @@ export class IssuesService {
   }
 
   /**
-   * Issue論理削除（ImagePathクリーンアップ統合版）
+   * Issue論理削除（ImagePathクリーンアップ・WebSocket通知統合版）
    * @param id IssueID
    * @returns 削除処理結果
    * @throws NotFoundException Issueが存在しない、または既に論理削除済みの場合
@@ -411,6 +474,31 @@ export class IssuesService {
       } catch (changeLogError) {
         this.logger.warn(`Failed to record change log for issue deletion ${id}: ${changeLogError.message}`);
         // ChangeLog記録エラーは Issue削除を阻害しない
+      }
+
+      // WebSocket通知配信 - Issue削除
+      try {
+        const issueNotificationData: IssueNotificationData = {
+          action: 'delete',
+          issue: {
+            id: existingIssue.id,
+            title: existingIssue.title,
+            description_md: existingIssue.description_md,
+            assignee: existingIssue.assignee,
+            status: existingIssue.status,
+            start_date: existingIssue.start_date,
+            end_date: existingIssue.end_date,
+            progress_pct: existingIssue.progress_pct,
+            project_id: existingIssue.project_id,
+            parent_id: existingIssue.parent_id,
+          },
+          author: 'system',
+        };
+        
+        await this.notificationGateway.notifyIssueChanged(issueNotificationData);
+      } catch (notificationError) {
+        this.logger.warn(`Failed to send WebSocket notification for issue deletion ${id}: ${notificationError.message}`);
+        // WebSocket通知エラーは Issue削除を阻害しない
       }
 
       this.logger.log(`Issue removed successfully: ${id}`);
