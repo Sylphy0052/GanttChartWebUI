@@ -27,13 +27,14 @@ const ProjectList: React.FC<ProjectListProps> = ({
     try {
       setIsLoading(true);
       setError(null);
+      console.log('API_BASE_URL:', process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001');
       const data = await projectsApi.getAll();
       setProjects(data);
     } catch (error) {
       if (error instanceof ApiError) {
-        setError(`プロジェクトの読み込みに失敗しました: ${error.message}`);
+        setError(`プロジェクトの読み込みに失敗しました: ${error.message} (ステータス: ${error.status})`);
       } else {
-        setError('ネットワークエラーが発生しました');
+        setError(`ネットワークエラーが発生しました: ${error?.message || String(error)}`);
       }
       console.error('Failed to load projects:', error);
     } finally {

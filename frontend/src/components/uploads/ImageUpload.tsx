@@ -2,7 +2,7 @@
 
 import React, { useState, useCallback, useRef } from 'react';
 import { ProjectRole } from '@/types/project';
-import { UploadProgress, UPLOAD_CONSTRAINTS, UploadedFile } from '@/types/upload';
+import { UploadProgress, UPLOAD_CONSTRAINTS, UploadedFile, isAllowedMimeType } from '@/types/upload';
 import { uploadsApi } from '@/lib/api';
 
 interface ImageUploadProps {
@@ -30,7 +30,7 @@ const ImageUpload: React.FC<ImageUploadProps> = ({
       return `ファイルサイズが制限を超えています。最大サイズ: ${UPLOAD_CONSTRAINTS.MAX_FILE_SIZE / 1024 / 1024}MB`;
     }
 
-    if (!UPLOAD_CONSTRAINTS.ALLOWED_TYPES.includes(file.type)) {
+    if (!isAllowedMimeType(file.type)) {
       return `サポートされていないファイル形式です。対応形式: ${UPLOAD_CONSTRAINTS.ALLOWED_EXTENSIONS.join(', ')}`;
     }
 

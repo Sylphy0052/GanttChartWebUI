@@ -4,7 +4,15 @@ import { ImportResult } from '@/types/backup';
 import { Issue, CreateIssueDto, UpdateIssueDto, Comment, CreateCommentDto, UpdateCommentDto, ChangeLogEntry, IssueDetailData } from '@/types/issue';
 import { UploadedFile, FileUploadResponse } from '@/types/upload';
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3000/api';
+// Docker環境では内部通信用、ブラウザでは外部アクセス用のURLを使用
+const getApiBaseUrl = () => {
+  // サーバーサイド（Docker内部）では backend サービス名を使用
+  if (typeof window === 'undefined') {
+    return process.env.NEXT_PUBLIC_API_URL || 'http://backend:3002';
+  }
+  // クライアントサイド（ブラウザ）では localhost を使用
+  return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3012';
+};
 
 export class ApiError extends Error {
   constructor(
@@ -21,7 +29,7 @@ async function apiRequest<T>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<T> {
-  const url = `${API_BASE_URL}${endpoint}`;
+  const url = `${getApiBaseUrl()}${endpoint}`;
   
   const response = await fetch(url, {
     headers: {
@@ -48,7 +56,7 @@ async function downloadRequest(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<Blob> {
-  const url = `${API_BASE_URL}${endpoint}`;
+  const url = `${getApiBaseUrl()}${endpoint}`;
   
   const response = await fetch(url, {
     ...options,
@@ -72,7 +80,7 @@ async function uploadRequest<T>(
   formData: FormData,
   options: RequestInit = {}
 ): Promise<T> {
-  const url = `${API_BASE_URL}${endpoint}`;
+  const url = `${getApiBaseUrl()}${endpoint}`;
   
   const response = await fetch(url, {
     method: 'POST',
@@ -271,7 +279,7 @@ export const backupApi = {
       formData.append('projectName', projectName);
     }
 
-    const url = `${API_BASE_URL}/backup/import`;
+    const url = `${getApiBaseUrl()}/backup/import`;
     const response = await fetch(url, {
       method: 'POST',
       body: formData,

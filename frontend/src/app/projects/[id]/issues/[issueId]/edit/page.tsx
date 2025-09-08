@@ -200,11 +200,3 @@ export default function EditIssuePage() {
     />
   );
 }
-
-export async function generateMetadata({ params }: { params: Promise<{ id: string; issueId: string }> }) {
-  const { id, issueId } = await params;
-  return {
-    title: 'Issue編集 - Gantt Chart Web UI',
-    description: 'Issueを編集するページ',
-  };
-}

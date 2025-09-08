@@ -35,6 +35,11 @@ export interface FileUploadError {
 // File validation constraints
 export const UPLOAD_CONSTRAINTS = {
   MAX_FILE_SIZE: 10 * 1024 * 1024, // 10MB
-  ALLOWED_TYPES: ['image/jpeg', 'image/jpg', 'image/png', 'image/gif'],
-  ALLOWED_EXTENSIONS: ['.jpg', '.jpeg', '.png', '.gif'],
+  ALLOWED_TYPES: ['image/jpeg', 'image/jpg', 'image/png', 'image/gif'] as const,
+  ALLOWED_EXTENSIONS: ['.jpg', '.jpeg', '.png', '.gif'] as const,
 } as const;
+
+// Type guard for allowed MIME types
+export function isAllowedMimeType(mimeType: string): mimeType is typeof UPLOAD_CONSTRAINTS.ALLOWED_TYPES[number] {
+  return (UPLOAD_CONSTRAINTS.ALLOWED_TYPES as readonly string[]).includes(mimeType);
+}

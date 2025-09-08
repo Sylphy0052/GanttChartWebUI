@@ -266,10 +266,3 @@ export default function IssuesPage() {
   );
 }
 
-export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
-  return {
-    title: 'Issue管理 - Gantt Chart Web UI',
-    description: 'プロジェクトのIssue一覧ページ',
-  };
-}

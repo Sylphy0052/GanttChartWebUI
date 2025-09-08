@@ -90,11 +90,3 @@ export default function CreateIssuePage() {
     />
   );
 }
-
-export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
-  return {
-    title: 'Issue作成 - Gantt Chart Web UI',
-    description: '新しいIssueを作成するページ',
-  };
-}
