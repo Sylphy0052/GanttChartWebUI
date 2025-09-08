@@ -1,8 +1,159 @@
 {
   "phase": "implement",
   "current_milestone": "M4",
-  "current_task": null,
-  "next_tasks": [],
+  "current_task": {
+    "id": "m4-issue-integration",
+    "title": "Issue機能統合・依存関係設定",
+    "description": "Issues, Comments, ChangeLog, UploadsモジュールのApp.moduleへの統合、相互依存関係設定",
+    "milestone": "M4",
+    "estimated_hours": 0.5,
+    "status": "in_progress",
+    "dependencies": ["m4-changelog-service", "m4-image-upload-controller"],
+    "files": ["backend/src/app.module.ts", "backend/src/issues/issues.service.ts", "backend/src/comments/comments.service.ts"],
+    "acceptance_criteria": [
+      "全モジュールのApp.module.ts登録",
+      "Issue更新時のChangeLog自動記録",
+      "Comment作成・更新時のChangeLog自動記録",
+      "画像削除時のImagePathクリーンアップ",
+      "循環依存エラーの解決"
+    ],
+    "started_at": "2025-09-08T16:46:00Z"
+  },
+  "next_tasks": [
+    {
+      "id": "m4-issue-list-ui",
+      "title": "Issue一覧画面実装",
+      "description": "Issue一覧表示UI作成、フィルタリング（ステータス、担当者）、ソート機能、階層表示",
+      "milestone": "M4",
+      "estimated_hours": 2.0,
+      "status": "pending",
+      "dependencies": ["m4-issue-integration"],
+      "files": ["frontend/src/app/projects/[id]/issues/page.tsx", "frontend/src/components/issues/IssueList.tsx", "frontend/src/components/issues/IssueFilters.tsx"],
+      "acceptance_criteria": [
+        "Issue一覧のテーブル表示（title, status, priority, assignee, dates）",
+        "階層構造の視覚的表示（インデント、ツリー線）",
+        "ステータス・優先度によるフィルタリング",
+        "作成日・更新日によるソート",
+        "新規Issue作成ボタン（Editor権限時）",
+        "Issue詳細画面への遷移"
+      ]
+    },
+    {
+      "id": "m4-issue-form-ui",
+      "title": "Issue作成・編集フォーム実装",
+      "description": "Issue作成・編集フォームUI、バリデーション、親Issue選択機能、日付ピッカー",
+      "milestone": "M4",
+      "estimated_hours": 2.0,
+      "status": "pending", 
+      "dependencies": ["m4-issue-list-ui"],
+      "files": ["frontend/src/components/issues/IssueForm.tsx", "frontend/src/components/issues/ParentIssueSelector.tsx", "frontend/src/app/projects/[id]/issues/create/page.tsx", "frontend/src/app/projects/[id]/issues/[issueId]/edit/page.tsx"],
+      "acceptance_criteria": [
+        "タイトル・説明（Markdown）入力フィールド",
+        "ステータス・優先度選択（Select）",
+        "担当者入力フィールド",
+        "見積時間・実績時間入力",
+        "開始日・終了日選択（DatePicker）",
+        "親Issue選択（階層構造対応）",
+        "フォームバリデーション・エラー表示",
+        "権限による表示・編集制御"
+      ]
+    },
+    {
+      "id": "m4-issue-detail-ui",
+      "title": "Issue詳細画面実装",
+      "description": "Issue詳細表示UI、コメント一覧・投稿機能、変更履歴表示、関連画像表示",
+      "milestone": "M4",
+      "estimated_hours": 2.5,
+      "status": "pending",
+      "dependencies": ["m4-issue-form-ui"],
+      "files": ["frontend/src/app/projects/[id]/issues/[issueId]/page.tsx", "frontend/src/components/issues/IssueDetail.tsx", "frontend/src/components/issues/CommentSection.tsx", "frontend/src/components/issues/ChangeLogSection.tsx"],
+      "acceptance_criteria": [
+        "Issue基本情報表示（全フィールド）",
+        "Markdown説明の適切なレンダリング", 
+        "子Issue一覧表示（階層構造）",
+        "コメント一覧・新規投稿フォーム",
+        "コメント編集・削除機能（Editor権限）",
+        "変更履歴タイムライン表示",
+        "編集・削除ボタン（Editor権限時）"
+      ]
+    },
+    {
+      "id": "m4-image-upload-ui",
+      "title": "画像アップロードUI実装", 
+      "description": "画像アップロード機能UI、ドラッグ&ドロップ、プレビュー、サムネイル表示、削除機能",
+      "milestone": "M4",
+      "estimated_hours": 2.0,
+      "status": "pending",
+      "dependencies": ["m4-issue-detail-ui"],
+      "files": ["frontend/src/components/uploads/ImageUpload.tsx", "frontend/src/components/uploads/ImageGallery.tsx", "frontend/src/components/uploads/ImagePreview.tsx"],
+      "acceptance_criteria": [
+        "ドラッグ&ドロップによる画像アップロード",
+        "アップロード進捗表示",
+        "画像プレビュー機能",
+        "サムネイル一覧表示",
+        "画像拡大表示（Modal）",
+        "画像削除機能（Editor権限）",
+        "ファイルサイズ・形式制限の表示",
+        "エラーハンドリング・メッセージ表示"
+      ]
+    },
+    {
+      "id": "m4-websocket-notifications",
+      "title": "Issue・コメント変更WebSocket通知",
+      "description": "Issue・コメントの作成・更新・削除時のリアルタイム通知機能、既存WebSocketGateway拡張",
+      "milestone": "M4", 
+      "estimated_hours": 1.5,
+      "status": "pending",
+      "dependencies": ["m4-image-upload-ui"],
+      "files": ["backend/src/websocket/websocket.gateway.ts", "backend/src/issues/issues.service.ts", "backend/src/comments/comments.service.ts"],
+      "acceptance_criteria": [
+        "Issue作成・更新・削除時の通知配信",
+        "Comment作成・更新・削除時の通知配信", 
+        "プロジェクト参加者への適切な通知範囲",
+        "通知データ構造定義（type, entity, data）",
+        "フロントエンドでの通知受信・UI更新",
+        "既存のWebSocketGatewayとの整合性維持"
+      ]
+    },
+    {
+      "id": "m4-api-tests",
+      "title": "Issue機能APIテスト実装",
+      "description": "Issue, Comment, ImageUpload APIの単体・統合テスト作成、権限テスト、エラーケース",
+      "milestone": "M4",
+      "estimated_hours": 2.0,
+      "status": "pending", 
+      "dependencies": ["m4-websocket-notifications"],
+      "files": ["backend/src/issues/issues.service.spec.ts", "backend/src/issues/issues.controller.spec.ts", "backend/src/comments/comments.service.spec.ts", "backend/src/comments/comments.controller.spec.ts", "backend/test/issues.e2e-spec.ts"],
+      "acceptance_criteria": [
+        "IssuesService単体テスト（CRUD操作）",
+        "IssuesController統合テスト（API動作）",
+        "CommentsService単体テスト",
+        "権限テスト（Viewer/Editor）",
+        "エラーケーステスト（不正データ、存在しないリソース）",
+        "画像アップロードテスト",
+        "ChangeLog記録テスト"
+      ]
+    },
+    {
+      "id": "m4-frontend-tests",
+      "title": "Issue機能UIテスト実装",
+      "description": "Issue機能のE2Eテスト、UI操作テスト、権限による表示切り替えテスト",
+      "milestone": "M4",
+      "estimated_hours": 1.5,
+      "status": "pending",
+      "dependencies": ["m4-api-tests"],
+      "files": ["frontend/cypress/e2e/issues.cy.ts", "frontend/cypress/e2e/comments.cy.ts", "frontend/cypress/e2e/image-upload.cy.ts"],
+      "acceptance_criteria": [
+        "Issue作成・編集・削除のE2Eテスト",
+        "Issue一覧・詳細画面の表示テスト",
+        "コメント投稿・編集・削除テスト",
+        "画像アップロード・削除テスト",
+        "権限による機能制限テスト",
+        "エラーハンドリングテスト",
+        "WebSocket通知テスト"
+      ]
+    }
+  ],
   "completed_tasks": [
     {
       "id": "docker-base",
@@ -255,6 +406,109 @@
       "files": ["frontend/cypress/e2e/project-management.cy.ts"],
       "started_at": "2025-09-08T09:00:00Z",
       "completed_at": "2025-09-08T10:00:00Z"
+    },
+    {
+      "id": "m4-issue-dto-entities",
+      "title": "Issue DTO・エンティティ定義",
+      "description": "Issue CRUD用のDTO定義、バリデーション設定、型定義の作成（CreateIssueDto, UpdateIssueDto, IssueResponseDto）",
+      "milestone": "M4",
+      "estimated_hours": 1.0,
+      "status": "completed",
+      "dependencies": [],
+      "files": ["backend/src/issues/dto/create-issue.dto.ts", "backend/src/issues/dto/update-issue.dto.ts", "backend/src/issues/dto/issue-response.dto.ts", "backend/src/issues/dto/index.ts"],
+      "started_at": "2025-09-08T11:00:00Z",
+      "completed_at": "2025-09-08T11:30:00Z"
+    },
+    {
+      "id": "m4-issue-service-crud",
+      "title": "Issue Service基本CRUD実装",
+      "description": "IssueService作成、基本CRUD操作（create, findAll, findOne, update, remove）、論理削除対応、階層構造検索",
+      "milestone": "M4",
+      "estimated_hours": 2.0,
+      "status": "completed",
+      "dependencies": ["m4-issue-dto-entities"],
+      "files": ["backend/src/issues/issues.service.ts", "backend/src/issues/issues.module.ts"],
+      "started_at": "2025-09-08T11:35:00Z",
+      "completed_at": "2025-09-08T12:30:00Z"
+    },
+    {
+      "id": "m4-issue-controller-api",
+      "title": "Issue Controller・API実装",
+      "description": "IssuesController作成、REST APIエンドポイント実装、権限ガード適用、エラーハンドリング",
+      "milestone": "M4",
+      "estimated_hours": 1.5,
+      "status": "completed",
+      "dependencies": ["m4-issue-service-crud"],
+      "files": ["backend/src/issues/issues.controller.ts", "backend/src/app.module.ts"],
+      "started_at": "2025-09-08T12:35:00Z",
+      "completed_at": "2025-09-08T13:20:00Z"
+    },
+    {
+      "id": "m4-comment-dto-service",
+      "title": "Comment DTO・Service実装",
+      "description": "Comment用DTO作成、CommentService実装、CRUD操作、編集機能（editedフラグ）対応",
+      "milestone": "M4",
+      "estimated_hours": 1.5,
+      "status": "completed",
+      "dependencies": ["m4-issue-service-crud"],
+      "files": ["backend/src/comments/dto/create-comment.dto.ts", "backend/src/comments/dto/update-comment.dto.ts", "backend/src/comments/dto/comment-response.dto.ts", "backend/src/comments/comments.service.ts", "backend/src/comments/comments.module.ts"],
+      "started_at": "2025-09-08T13:25:00Z",
+      "completed_at": "2025-09-08T14:10:00Z"
+    },
+    {
+      "id": "m4-comment-controller-api",
+      "title": "Comment Controller・API実装",
+      "description": "CommentsController作成、コメントCRUD APIエンドポイント、Issue紐付け管理",
+      "milestone": "M4",
+      "estimated_hours": 1.0,
+      "status": "completed",
+      "dependencies": ["m4-comment-dto-service"],
+      "files": ["backend/src/comments/comments.controller.ts"],
+      "started_at": "2025-09-08T14:15:00Z",
+      "completed_at": "2025-09-08T14:45:00Z"
+    },
+    {
+      "id": "m4-changelog-service",
+      "title": "変更履歴（ChangeLog）Service実装",
+      "description": "ChangeLogService作成、Issue・Comment変更時の自動履歴記録機能、履歴取得API",
+      "milestone": "M4",
+      "estimated_hours": 1.5,
+      "status": "completed",
+      "dependencies": ["m4-comment-controller-api"],
+      "files": ["backend/src/changelog/changelog.service.ts", "backend/src/changelog/changelog.module.ts", "backend/src/changelog/dto/changelog-response.dto.ts"],
+      "started_at": "2025-09-08T14:50:00Z",
+      "completed_at": "2025-09-08T15:30:00Z"
+    },
+    {
+      "id": "m4-image-upload-service",
+      "title": "画像アップロードService実装",
+      "description": "ImageUploadService作成、ファイルアップロード処理、サムネイル生成（Sharp）、ImagePath管理",
+      "milestone": "M4",
+      "estimated_hours": 2.0,
+      "status": "completed",
+      "dependencies": ["m4-issue-controller-api"],
+      "files": ["backend/src/uploads/uploads.service.ts", "backend/src/uploads/uploads.module.ts", "backend/src/uploads/dto/upload-response.dto.ts", "backend/package.json"],
+      "started_at": "2025-09-08T15:35:00Z",
+      "completed_at": "2025-09-08T16:30:00Z"
+    },
+    {
+      "id": "m4-image-upload-controller",
+      "title": "画像アップロードController・API実装",
+      "description": "UploadsController作成、画像アップロードAPI、画像取得API、削除API実装",
+      "milestone": "M4",
+      "estimated_hours": 1.0,
+      "status": "completed",
+      "dependencies": ["m4-image-upload-service"],
+      "files": ["backend/src/uploads/uploads.controller.ts", "backend/src/uploads/dto/create-image-upload.dto.ts", "backend/src/uploads/uploads.module.ts", "backend/src/app.module.ts"],
+      "acceptance_criteria": [
+        "POST /issues/:issueId/images - 画像アップロード（Editor権限）",
+        "GET /images/:id - 画像取得（オリジナル・サムネイル）",
+        "DELETE /images/:id - 画像削除（Editor権限）",
+        "Multerを使用したファイルアップロード",
+        "適切なContent-Type設定"
+      ],
+      "started_at": "2025-09-08T16:35:00Z",
+      "completed_at": "2025-09-08T16:45:00Z"
     }
   ],
   "milestones": {
@@ -281,7 +535,7 @@
     "M4": {
       "name": "Issue機能",
       "description": "Issue CRUD + コメント + 履歴 + 画像アップロード",
-      "status": "pending"
+      "status": "in_progress"
     },
     "M5": {
       "name": "WBS機能",
@@ -303,5 +557,5 @@
     "initial_render_ms_p95": 1500,
     "drag_latency_ms_p95": 100
   },
-  "updated_at": "2025-09-08T10:00:00Z"
+  "updated_at": "2025-09-08T16:30:00Z"
 }

@@ -67,7 +67,7 @@ Cypress.Commands.add('cleanupTestData', () => {
 })
 
 Cypress.Commands.add('mockApiResponse', (method: string, url: string, response: any) => {
-  cy.intercept(method, url, response)
+  cy.intercept(method as any, url, response)
 })
 
 Cypress.Commands.add('waitForApi', (alias: string) => {

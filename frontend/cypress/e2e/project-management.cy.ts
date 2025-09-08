@@ -547,10 +547,10 @@ describe('Project Management E2E Tests', () => {
       cy.visit('/projects')
       
       // Tab through interactive elements
-      cy.get('body').tab()
+      cy.get('body').trigger('keydown', { key: 'Tab' })
       cy.focused().should('have.attr', 'data-testid', 'create-project-btn')
       
-      cy.focused().tab()
+      cy.focused().trigger('keydown', { key: 'Tab' })
       cy.focused().should('have.attr', 'data-testid', 'project-item-1')
       
       // Test ARIA labels and roles

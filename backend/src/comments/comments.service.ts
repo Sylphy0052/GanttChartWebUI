@@ -1,23 +1,28 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../database/prisma.service';
+import { ChangeLogService } from '../changelog/changelog.service';
 import { CreateCommentDto, UpdateCommentDto, CommentResponseDto } from './dto';
 import { Comment } from '@prisma/client';
 import { plainToClass } from 'class-transformer';
 
 /**
- * CommentsService - Comment管理のビジネスロジック
+ * CommentsService - Comment管理のビジネスロジック（ChangeLog統合版）
  * 
  * 機能:
  * - Comment基本CRUD操作（create, findByIssue, findOne, update, remove）
  * - Issue存在確認
  * - editedフラグ自動管理（更新時にtrueに設定）
  * - レスポンスDTO変換
+ * - ChangeLog自動記録（作成・更新・削除時）
  */
 @Injectable()
 export class CommentsService {
   private readonly logger = new Logger(CommentsService.name);
 
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly changeLogService: ChangeLogService,
+  ) {}
 
   /**
    * Comment作成
@@ -51,6 +56,24 @@ export class CommentsService {
           edited: false,
         },
       });
+
+      // ChangeLog記録 - Comment作成
+      try {
+        await this.changeLogService.recordCommentChange(
+          comment.id,
+          {
+            action: 'create',
+            author: comment.author,
+            body_md: comment.body_md,
+            issue_id: issueId,
+          },
+          issue.project_id,
+          createCommentDto.author,
+        );
+      } catch (changeLogError) {
+        this.logger.warn(`Failed to record change log for comment creation ${comment.id}: ${changeLogError.message}`);
+        // ChangeLog記録エラーは Comment作成を阻害しない
+      }
 
       this.logger.log(`Comment created with ID: ${comment.id}`);
       return plainToClass(CommentResponseDto, comment);
@@ -143,6 +166,25 @@ export class CommentsService {
         throw new NotFoundException('指定されたコメントが見つかりません');
       }
 
+      // Issue情報取得（ChangeLog用project_id取得のため）
+      const issue = await this.prisma.issue.findFirst({
+        where: {
+          id: existingComment.issue_id,
+          is_deleted: false,
+        },
+      });
+
+      if (!issue) {
+        throw new NotFoundException('関連するIssueが見つかりません');
+      }
+
+      // 更新前の値を記録（ChangeLog用）
+      const previousValues = {
+        author: existingComment.author,
+        body_md: existingComment.body_md,
+        edited: existingComment.edited,
+      };
+
       // 更新データ準備（contentがある場合はbody_mdにマッピングし、editedをtrueに）
       const updateData: any = {};
       
@@ -159,6 +201,32 @@ export class CommentsService {
         where: { id },
         data: updateData,
       });
+
+      // ChangeLog記録 - 変更差分のみ記録
+      try {
+        const changes: Record<string, any> = { action: 'update' };
+        let hasChanges = false;
+
+        Object.keys(updateData).forEach(key => {
+          if (previousValues[key] !== updateData[key]) {
+            changes[`${key}_from`] = previousValues[key];
+            changes[`${key}_to`] = updateData[key];
+            hasChanges = true;
+          }
+        });
+
+        if (hasChanges) {
+          await this.changeLogService.recordCommentChange(
+            updatedComment.id,
+            changes,
+            issue.project_id,
+            updateCommentDto.author || existingComment.author,
+          );
+        }
+      } catch (changeLogError) {
+        this.logger.warn(`Failed to record change log for comment update ${id}: ${changeLogError.message}`);
+        // ChangeLog記録エラーは Comment更新を阻害しない
+      }
 
       this.logger.log(`Comment updated with ID: ${updatedComment.id}`);
       return plainToClass(CommentResponseDto, updatedComment);
@@ -186,10 +254,40 @@ export class CommentsService {
         throw new NotFoundException('指定されたコメントが見つかりません');
       }
 
+      // Issue情報取得（ChangeLog用project_id取得のため）
+      const issue = await this.prisma.issue.findFirst({
+        where: {
+          id: existingComment.issue_id,
+          is_deleted: false,
+        },
+      });
+
+      if (!issue) {
+        throw new NotFoundException('関連するIssueが見つかりません');
+      }
+
       // 物理削除
       await this.prisma.comment.delete({
         where: { id },
       });
+
+      // ChangeLog記録 - Comment削除
+      try {
+        await this.changeLogService.recordCommentChange(
+          id,
+          {
+            action: 'delete',
+            author: existingComment.author,
+            body_md: existingComment.body_md,
+            deleted_at: new Date(),
+          },
+          issue.project_id,
+          'system',
+        );
+      } catch (changeLogError) {
+        this.logger.warn(`Failed to record change log for comment deletion ${id}: ${changeLogError.message}`);
+        // ChangeLog記録エラーは Comment削除を阻害しない
+      }
 
       this.logger.log(`Comment removed with ID: ${id}`);
     } catch (error) {
