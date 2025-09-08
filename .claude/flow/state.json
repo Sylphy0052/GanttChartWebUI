@@ -1,9 +1,8 @@
 {
   "phase": "implement",
-  "current_milestone": "M2",
+  "current_milestone": "M4",
   "current_task": null,
-  "next_tasks": [
-  ],
+  "next_tasks": [],
   "completed_tasks": [
     {
       "id": "docker-base",
@@ -124,6 +123,138 @@
       "files": ["backend/src/projects/projects.service.spec.ts", "backend/src/projects/projects.controller.spec.ts", "backend/src/auth/auth.middleware.ts", "backend/src/common/guards/"],
       "started_at": "2025-09-07T10:00:00Z",
       "completed_at": "2025-09-07T12:00:00Z"
+    },
+    {
+      "id": "m3-project-shared-password",
+      "title": "プロジェクト共有パスワード機能実装",
+      "description": "Project モデルの shared_password_hash フィールド活用、パスワードハッシュ化（bcrypt）、パスワード認証ミドルウェア拡張",
+      "milestone": "M3",
+      "estimated_hours": 1.5,
+      "status": "completed",
+      "dependencies": ["m2-project-crud-api"],
+      "files": ["backend/src/auth/auth.middleware.ts", "backend/src/projects/projects.service.ts"],
+      "started_at": "2025-09-07T14:00:00Z",
+      "completed_at": "2025-09-07T15:30:00Z"
+    },
+    {
+      "id": "m3-role-guard",
+      "title": "権限管理（Viewer/Editor）ガード実装",
+      "description": "RoleGuard の作成、ViewerとEditor権限の判定ロジック、各APIエンドポイントへの権限適用",
+      "milestone": "M3",
+      "estimated_hours": 2.0,
+      "status": "completed",
+      "dependencies": ["m3-project-shared-password"],
+      "files": ["backend/src/common/guards/role.guard.ts", "backend/src/projects/projects.controller.ts"],
+      "started_at": "2025-09-07T16:00:00Z",
+      "completed_at": "2025-09-07T18:00:00Z"
+    },
+    {
+      "id": "m3-global-settings-api",
+      "title": "GlobalSettings Controller・Service作成",
+      "description": "GlobalSettings CRUD API、休日設定、単一レコード管理（Singleton パターン）",
+      "milestone": "M3",
+      "estimated_hours": 1.5,
+      "status": "completed",
+      "dependencies": ["m3-role-guard"],
+      "files": ["backend/src/settings/settings.controller.ts", "backend/src/settings/settings.service.ts", "backend/src/settings/settings.module.ts"],
+      "started_at": "2025-09-07T19:00:00Z",
+      "completed_at": "2025-09-07T20:30:00Z"
+    },
+    {
+      "id": "m3-websocket-notification",
+      "title": "設定変更WebSocket通知実装",
+      "description": "設定変更時のWebSocket通知、既存セッションの再認証促進、設定変更イベントの配信",
+      "milestone": "M3",
+      "estimated_hours": 1.5,
+      "status": "completed",
+      "dependencies": ["m3-global-settings-api"],
+      "files": ["backend/src/settings/settings.service.ts", "backend/src/websocket/websocket.gateway.ts"],
+      "started_at": "2025-09-07T21:00:00Z",
+      "completed_at": "2025-09-07T22:30:00Z"
+    },
+    {
+      "id": "m3-project-export",
+      "title": "プロジェクトエクスポート機能実装",
+      "description": "プロジェクトデータのJSON出力、削除済みデータ除外、画像ファイルの収集・ZIP化",
+      "milestone": "M3",
+      "estimated_hours": 2.0,
+      "status": "completed",
+      "dependencies": ["m3-websocket-notification"],
+      "files": ["backend/src/backup/backup.controller.ts", "backend/src/backup/backup.service.ts", "backend/src/backup/backup.module.ts"],
+      "started_at": "2025-09-07T23:00:00Z",
+      "completed_at": "2025-09-08T01:00:00Z"
+    },
+    {
+      "id": "m3-project-import",
+      "title": "プロジェクトインポート機能実装",
+      "description": "ZIPファイルのアップロード・解析、データベースへの復元処理、画像ファイルの配置、データ整合性チェック",
+      "milestone": "M3",
+      "estimated_hours": 2.0,
+      "status": "completed",
+      "dependencies": ["m3-project-export"],
+      "files": ["backend/src/backup/backup.service.ts", "backend/src/backup/dto/import-project.dto.ts"],
+      "started_at": "2025-09-08T01:00:00Z",
+      "completed_at": "2025-09-08T03:00:00Z"
+    },
+    {
+      "id": "m3-project-list-ui",
+      "title": "プロジェクト一覧画面実装",
+      "description": "プロジェクト一覧表示、新規作成・編集・削除ボタン、共有パスワード入力フォーム、権限状態表示",
+      "milestone": "M3",
+      "estimated_hours": 2.0,
+      "status": "completed",
+      "dependencies": ["m3-role-guard"],
+      "files": ["frontend/src/app/projects/page.tsx", "frontend/src/components/projects/ProjectList.tsx", "frontend/src/components/projects/PasswordForm.tsx"],
+      "started_at": "2025-09-08T05:00:00Z",
+      "completed_at": "2025-09-08T06:00:00Z"
+    },
+    {
+      "id": "m3-global-settings-ui",
+      "title": "共通設定画面実装",
+      "description": "休日設定（土日ON/OFF）、固定休日一覧・追加・削除、設定の保存・リセット",
+      "milestone": "M3",
+      "estimated_hours": 1.5,
+      "status": "completed",
+      "dependencies": ["m3-global-settings-api"],
+      "files": ["frontend/src/app/settings/page.tsx", "frontend/src/components/settings/GlobalSettings.tsx", "frontend/src/components/settings/HolidayDatePicker.tsx"],
+      "started_at": "2025-09-08T06:30:00Z",
+      "completed_at": "2025-09-08T07:00:00Z"
+    },
+    {
+      "id": "m3-backup-ui",
+      "title": "バックアップ/復元画面実装",
+      "description": "エクスポートボタン・進捗表示、インポート用ファイルアップロード、処理状況の表示・エラーハンドリング",
+      "milestone": "M3",
+      "estimated_hours": 2.0,
+      "status": "completed",
+      "dependencies": ["m3-project-import"],
+      "files": ["frontend/src/app/projects/[id]/backup/page.tsx", "frontend/src/components/backup/ExportSection.tsx", "frontend/src/components/backup/ImportSection.tsx"],
+      "started_at": "2025-09-08T07:00:00Z",
+      "completed_at": "2025-09-08T08:00:00Z"
+    },
+    {
+      "id": "m3-integration-tests",
+      "title": "API統合テスト作成",
+      "description": "権限管理のE2Eテスト、バックアップ/復元のテスト、設定変更のテスト",
+      "milestone": "M3",
+      "estimated_hours": 1.5,
+      "status": "completed",
+      "dependencies": ["m3-backup-ui"],
+      "files": ["backend/test/auth.e2e-spec.ts", "backend/test/backup.e2e-spec.ts", "backend/test/settings.e2e-spec.ts"],
+      "started_at": "2025-09-08T08:00:00Z",
+      "completed_at": "2025-09-08T09:00:00Z"
+    },
+    {
+      "id": "m3-frontend-tests",
+      "title": "フロントエンド統合テスト",
+      "description": "UI操作のE2Eテスト、権限による表示切り替え、エラーハンドリング",
+      "milestone": "M3",
+      "estimated_hours": 1.0,
+      "status": "completed",
+      "dependencies": ["m3-integration-tests"],
+      "files": ["frontend/cypress/e2e/project-management.cy.ts"],
+      "started_at": "2025-09-08T09:00:00Z",
+      "completed_at": "2025-09-08T10:00:00Z"
     }
   ],
   "milestones": {
@@ -145,7 +276,7 @@
     "M3": {
       "name": "プロジェクト管理機能",
       "description": "プロジェクト管理 + 共通設定 + バックアップ/復元",
-      "status": "pending"
+      "status": "completed"
     },
     "M4": {
       "name": "Issue機能",
@@ -172,5 +303,5 @@
     "initial_render_ms_p95": 1500,
     "drag_latency_ms_p95": 100
   },
-  "updated_at": "2025-09-07T12:00:00Z"
+  "updated_at": "2025-09-08T10:00:00Z"
 }
