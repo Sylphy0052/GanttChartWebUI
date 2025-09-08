@@ -10,7 +10,9 @@ import { Server, Socket } from 'socket.io';
 import { 
   WebSocketNotification, 
   NotificationRequest, 
-  NotificationTarget 
+  NotificationTarget,
+  IssueNotificationData,
+  CommentNotificationData
 } from './interfaces/websocket-notification.interface';
 
 /**
@@ -19,11 +21,15 @@ import {
  * 機能:
  * - WebSocket接続の管理（接続・切断・認証）
  * - 設定変更通知の配信（全体・プロジェクト特定）
+ * - Issue・Comment変更通知の配信（プロジェクト参加者向け）
  * - セッション管理とルーム分け
  * - エラーハンドリングとログ出力
  * 
  * 受け入れ条件:
  * - 設定変更時のWebSocket通知配信
+ * - Issue作成・更新・削除時の通知配信
+ * - Comment作成・更新・削除時の通知配信
+ * - プロジェクト参加者への適切な通知範囲
  * - 既存セッションの再認証促進
  * - 設定変更イベントの配信
  */
@@ -83,7 +89,7 @@ export class NotificationGateway
   }
 
   /**
-   * 設定変更通知の配信
+   * 汎用通知の配信
    * 
    * 通知配信の実装:
    * - 対象に応じた配信先の決定（全体/プロジェクト特定）
@@ -159,6 +165,131 @@ export class NotificationGateway
     };
 
     await this.sendNotification(request);
+  }
+
+  /**
+   * Issue変更通知の作成と送信
+   * 
+   * IssuesServiceから呼び出されるIssue通知メソッド:
+   * - Issue作成・更新・削除時の通知作成
+   * - プロジェクト参加者への通知配信
+   * - Issue詳細データの包含
+   * 
+   * @param issueNotificationData Issue通知データ
+   */
+  async notifyIssueChanged(issueNotificationData: IssueNotificationData): Promise<void> {
+    try {
+      const { action, issue, author } = issueNotificationData;
+      
+      // 通知イベント種別の決定
+      let event: 'issue_created' | 'issue_updated' | 'issue_deleted';
+      let message: string;
+      
+      switch (action) {
+        case 'create':
+          event = 'issue_created';
+          message = `新しいIssue「${issue.title}」が作成されました`;
+          break;
+        case 'update':
+          event = 'issue_updated';
+          message = `Issue「${issue.title}」が更新されました`;
+          break;
+        case 'delete':
+          event = 'issue_deleted';
+          message = `Issue「${issue.title}」が削除されました`;
+          break;
+        default:
+          throw new Error(`Unknown issue action: ${action}`);
+      }
+
+      const notification: WebSocketNotification = {
+        event,
+        data: {
+          message,
+          timestamp: new Date().toISOString(),
+          projectId: issue.project_id,
+          entityType: 'issue',
+          entityId: issue.id,
+          entity: issue,
+        },
+      };
+
+      const request: NotificationRequest = {
+        target: 'PROJECT',
+        notification,
+        projectId: issue.project_id,
+      };
+
+      await this.sendNotification(request);
+      this.logger.log(`Issue ${action} notification sent for issue ${issue.id} in project ${issue.project_id}`);
+    } catch (error) {
+      this.logger.error(`Failed to send issue notification: ${error.message}`, error);
+      // Issue通知エラーはサービス操作を阻害しない
+    }
+  }
+
+  /**
+   * Comment変更通知の作成と送信
+   * 
+   * CommentsServiceから呼び出されるComment通知メソッド:
+   * - Comment作成・更新・削除時の通知作成
+   * - プロジェクト参加者への通知配信
+   * - Comment・Issue詳細データの包含
+   * 
+   * @param commentNotificationData Comment通知データ
+   */
+  async notifyCommentChanged(commentNotificationData: CommentNotificationData): Promise<void> {
+    try {
+      const { action, comment, issue, author } = commentNotificationData;
+      
+      // 通知イベント種別の決定
+      let event: 'comment_created' | 'comment_updated' | 'comment_deleted';
+      let message: string;
+      
+      switch (action) {
+        case 'create':
+          event = 'comment_created';
+          message = `Issue「${issue.title}」に新しいコメントが投稿されました`;
+          break;
+        case 'update':
+          event = 'comment_updated';
+          message = `Issue「${issue.title}」のコメントが更新されました`;
+          break;
+        case 'delete':
+          event = 'comment_deleted';
+          message = `Issue「${issue.title}」のコメントが削除されました`;
+          break;
+        default:
+          throw new Error(`Unknown comment action: ${action}`);
+      }
+
+      const notification: WebSocketNotification = {
+        event,
+        data: {
+          message,
+          timestamp: new Date().toISOString(),
+          projectId: issue.project_id,
+          entityType: 'comment',
+          entityId: comment.id,
+          entity: {
+            comment,
+            issue,
+          },
+        },
+      };
+
+      const request: NotificationRequest = {
+        target: 'PROJECT',
+        notification,
+        projectId: issue.project_id,
+      };
+
+      await this.sendNotification(request);
+      this.logger.log(`Comment ${action} notification sent for comment ${comment.id} in issue ${issue.id}`);
+    } catch (error) {
+      this.logger.error(`Failed to send comment notification: ${error.message}`, error);
+      // Comment通知エラーはサービス操作を阻害しない
+    }
   }
 
   /**

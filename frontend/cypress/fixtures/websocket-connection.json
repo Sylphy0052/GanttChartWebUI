@@ -1,0 +1,17 @@
+{
+  "status": "connected",
+  "connection_id": "ws-conn-123456",
+  "supported_events": [
+    "issue_created",
+    "issue_updated",
+    "issue_deleted",
+    "comment_added",
+    "comment_updated",
+    "comment_deleted",
+    "file_uploaded",
+    "file_deleted"
+  ],
+  "user_id": "test-user@example.com",
+  "project_id": "test-project-123",
+  "timestamp": "2024-01-01T10:00:00Z"
+}
