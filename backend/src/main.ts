@@ -26,13 +26,13 @@ async function bootstrap() {
   // グローバル例外フィルター設定
   app.useGlobalFilters(new HttpExceptionFilter());
 
-  // CORS設定（開発環境用）
-  if (process.env.NODE_ENV === 'development') {
-    app.enableCors({
-      origin: ['http://localhost:3000', 'http://localhost:5173'],
-      credentials: true,
-    });
-  }
+  // CORS設定
+  app.enableCors({
+    origin: ['http://localhost:3000', 'http://localhost:3011', 'http://localhost:5173'],
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+  });
 
   // ポート設定
   const port = process.env.PORT || 3001;

@@ -1,5 +1,6 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../database/prisma.service';
+import { IssueStatus, DependencyType, ChangeEntityType } from '@prisma/client';
 import {
   ProjectExportData,
   ExportMetadata,
@@ -179,7 +180,7 @@ export class BackupService {
               title: issue.title,
               description_md: issue.description_md,
               assignee: issue.assignee,
-              status: issue.status,
+              status: issue.status as IssueStatus,
               start_date: issue.start_date,
               end_date: issue.end_date,
               progress_pct: issue.progress_pct,
@@ -205,7 +206,7 @@ export class BackupService {
                 title: issue.title,
                 description_md: issue.description_md,
                 assignee: issue.assignee,
-                status: issue.status,
+                status: issue.status as IssueStatus,
                 start_date: issue.start_date,
                 end_date: issue.end_date,
                 progress_pct: issue.progress_pct,
@@ -251,7 +252,7 @@ export class BackupService {
                 project_id: newProject.id,
                 predecessor_issue_id: predecessorId,
                 successor_issue_id: successorId,
-                type: dependency.type,
+                type: dependency.type as DependencyType,
               },
             });
           }
@@ -264,7 +265,7 @@ export class BackupService {
       // Change logs は元のIDでは意味がないので、インポート記録として1つだけ作成
       await prisma.changeLog.create({
         data: {
-          entity_type: 'project',
+          entity_type: ChangeEntityType.Project,
           entity_id: newProject.id,
           project_id: newProject.id,
           diff_json: {
