@@ -1,8 +1,9 @@
-import { Injectable, Logger, NotFoundException, ConflictException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, ConflictException, UnauthorizedException } from '@nestjs/common';
 import { PrismaService } from '../database/prisma.service';
-import { CreateProjectDto, UpdateProjectDto, ProjectResponseDto } from './dto';
+import { CreateProjectDto, UpdateProjectDto, ProjectResponseDto, SetProjectPasswordDto } from './dto';
 import { Project } from '@prisma/client';
 import { plainToClass } from 'class-transformer';
+import * as bcrypt from 'bcrypt';
 
 /**
  * ProjectsService - プロジェクトビジネスロジック
@@ -12,10 +13,12 @@ import { plainToClass } from 'class-transformer';
  * - バリデーションとエラーハンドリング
  * - 論理削除対応（is_deleted=true）
  * - レスポンスDTO変換
+ * - プロジェクト共有パスワード機能
  */
 @Injectable()
 export class ProjectsService {
   private readonly logger = new Logger(ProjectsService.name);
+  private readonly saltRounds = 10;
 
   constructor(private readonly prisma: PrismaService) {}
 
@@ -206,6 +209,92 @@ export class ProjectsService {
       this.logger.log(`Project removed successfully: ${id}`);
     } catch (error) {
       this.logger.error(`Failed to remove project ${id}: ${error.message}`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * プロジェクト共有パスワード設定
+   * @param id プロジェクトID
+   * @param setPasswordDto パスワード設定データ
+   * @returns 更新されたプロジェクト
+   * @throws NotFoundException プロジェクトが存在しないまたは削除済みの場合
+   */
+  async setSharedPassword(id: string, setPasswordDto: SetProjectPasswordDto): Promise<ProjectResponseDto> {
+    this.logger.log(`Setting shared password for project: ${id}`);
+
+    try {
+      // プロジェクトの存在確認
+      const existingProject = await this.prisma.project.findFirst({
+        where: {
+          id,
+          is_deleted: false,
+        },
+      });
+
+      if (!existingProject) {
+        throw new NotFoundException('プロジェクトが見つかりません');
+      }
+
+      // パスワードをハッシュ化
+      const hashedPassword = await bcrypt.hash(setPasswordDto.password, this.saltRounds);
+
+      const updatedProject = await this.prisma.project.update({
+        where: { id },
+        data: {
+          shared_password_hash: hashedPassword,
+        },
+      });
+
+      this.logger.log(`Project shared password set successfully: ${updatedProject.id}`);
+      return this.toResponseDto(updatedProject);
+    } catch (error) {
+      this.logger.error(`Failed to set shared password for project ${id}: ${error.message}`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * プロジェクト共有パスワード認証
+   * @param id プロジェクトID
+   * @param password 平文パスワード
+   * @returns 認証成功時true、失敗時false
+   * @throws NotFoundException プロジェクトが存在しないまたは削除済みの場合
+   */
+  async authenticateSharedPassword(id: string, password: string): Promise<boolean> {
+    this.logger.log(`Authenticating shared password for project: ${id}`);
+
+    try {
+      // プロジェクトの存在確認
+      const project = await this.prisma.project.findFirst({
+        where: {
+          id,
+          is_deleted: false,
+        },
+      });
+
+      if (!project) {
+        throw new NotFoundException('プロジェクトが見つかりません');
+      }
+
+      // 共有パスワードが設定されていない場合
+      if (!project.shared_password_hash) {
+        this.logger.warn(`No shared password set for project: ${id}`);
+        return false;
+      }
+
+      // パスワード比較
+      const isValid = await bcrypt.compare(password, project.shared_password_hash);
+      
+      if (isValid) {
+        this.logger.log(`Shared password authentication successful for project: ${id}`);
+      } else {
+        this.logger.warn(`Shared password authentication failed for project: ${id}`);
+      }
+
+      return isValid;
+    } catch (error) {
+      this.logger.error(`Failed to authenticate shared password for project ${id}: ${error.message}`, error);
       throw error;
     }
   }
