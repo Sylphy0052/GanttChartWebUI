@@ -1,0 +1,67 @@
+{
+  "defaultSettings": {
+    "is_weekend_saturday_holiday": true,
+    "is_weekend_sunday_holiday": true,
+    "fixed_holidays": []
+  },
+  "customSettings": {
+    "is_weekend_saturday_holiday": false,
+    "is_weekend_sunday_holiday": true,
+    "fixed_holidays": [
+      {
+        "date": "2024-01-01",
+        "name": "元日"
+      },
+      {
+        "date": "2024-01-02", 
+        "name": "正月休み"
+      },
+      {
+        "date": "2024-01-03",
+        "name": "正月休み"
+      },
+      {
+        "date": "2024-04-29",
+        "name": "昭和の日"
+      },
+      {
+        "date": "2024-05-03",
+        "name": "憲法記念日"
+      },
+      {
+        "date": "2024-05-04",
+        "name": "みどりの日"
+      },
+      {
+        "date": "2024-05-05",
+        "name": "こどもの日"
+      },
+      {
+        "date": "2024-12-29",
+        "name": "年末休み"
+      },
+      {
+        "date": "2024-12-30",
+        "name": "年末休み"
+      },
+      {
+        "date": "2024-12-31",
+        "name": "大晦日"
+      }
+    ]
+  },
+  "updatedSettings": {
+    "is_weekend_saturday_holiday": true,
+    "is_weekend_sunday_holiday": false,
+    "fixed_holidays": [
+      {
+        "date": "2024-01-01",
+        "name": "元日"
+      },
+      {
+        "date": "2024-07-04",
+        "name": "Independence Day"
+      }
+    ]
+  }
+}
