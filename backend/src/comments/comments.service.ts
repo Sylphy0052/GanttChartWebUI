@@ -1,12 +1,14 @@
 import { Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../database/prisma.service';
 import { ChangeLogService } from '../changelog/changelog.service';
+import { NotificationGateway } from '../websocket/websocket.gateway';
+import { CommentNotificationData } from '../websocket/interfaces/websocket-notification.interface';
 import { CreateCommentDto, UpdateCommentDto, CommentResponseDto } from './dto';
 import { Comment } from '@prisma/client';
 import { plainToClass } from 'class-transformer';
 
 /**
- * CommentsService - Comment管理のビジネスロジック（ChangeLog統合版）
+ * CommentsService - Comment管理のビジネスロジック（ChangeLog・WebSocket通知統合版）
  * 
  * 機能:
  * - Comment基本CRUD操作（create, findByIssue, findOne, update, remove）
@@ -14,6 +16,7 @@ import { plainToClass } from 'class-transformer';
  * - editedフラグ自動管理（更新時にtrueに設定）
  * - レスポンスDTO変換
  * - ChangeLog自動記録（作成・更新・削除時）
+ * - WebSocket通知自動配信（作成・更新・削除時）
  */
 @Injectable()
 export class CommentsService {
@@ -22,6 +25,7 @@ export class CommentsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly changeLogService: ChangeLogService,
+    private readonly notificationGateway: NotificationGateway,
   ) {}
 
   /**
@@ -73,6 +77,31 @@ export class CommentsService {
       } catch (changeLogError) {
         this.logger.warn(`Failed to record change log for comment creation ${comment.id}: ${changeLogError.message}`);
         // ChangeLog記録エラーは Comment作成を阻害しない
+      }
+
+      // WebSocket通知配信 - Comment作成
+      try {
+        const commentNotificationData: CommentNotificationData = {
+          action: 'create',
+          comment: {
+            id: comment.id,
+            author: comment.author,
+            body_md: comment.body_md,
+            issue_id: comment.issue_id,
+            edited: comment.edited,
+          },
+          issue: {
+            id: issue.id,
+            title: issue.title,
+            project_id: issue.project_id,
+          },
+          author: createCommentDto.author,
+        };
+        
+        await this.notificationGateway.notifyCommentChanged(commentNotificationData);
+      } catch (notificationError) {
+        this.logger.warn(`Failed to send WebSocket notification for comment creation ${comment.id}: ${notificationError.message}`);
+        // WebSocket通知エラーは Comment作成を阻害しない
       }
 
       this.logger.log(`Comment created with ID: ${comment.id}`);
@@ -228,6 +257,40 @@ export class CommentsService {
         // ChangeLog記録エラーは Comment更新を阻害しない
       }
 
+      // WebSocket通知配信 - Comment更新（変更があった場合のみ）
+      try {
+        let hasChanges = false;
+        Object.keys(updateData).forEach(key => {
+          if (previousValues[key] !== updateData[key]) {
+            hasChanges = true;
+          }
+        });
+
+        if (hasChanges) {
+          const commentNotificationData: CommentNotificationData = {
+            action: 'update',
+            comment: {
+              id: updatedComment.id,
+              author: updatedComment.author,
+              body_md: updatedComment.body_md,
+              issue_id: updatedComment.issue_id,
+              edited: updatedComment.edited,
+            },
+            issue: {
+              id: issue.id,
+              title: issue.title,
+              project_id: issue.project_id,
+            },
+            author: updateCommentDto.author || existingComment.author,
+          };
+          
+          await this.notificationGateway.notifyCommentChanged(commentNotificationData);
+        }
+      } catch (notificationError) {
+        this.logger.warn(`Failed to send WebSocket notification for comment update ${id}: ${notificationError.message}`);
+        // WebSocket通知エラーは Comment更新を阻害しない
+      }
+
       this.logger.log(`Comment updated with ID: ${updatedComment.id}`);
       return plainToClass(CommentResponseDto, updatedComment);
     } catch (error) {
@@ -287,6 +350,31 @@ export class CommentsService {
       } catch (changeLogError) {
         this.logger.warn(`Failed to record change log for comment deletion ${id}: ${changeLogError.message}`);
         // ChangeLog記録エラーは Comment削除を阻害しない
+      }
+
+      // WebSocket通知配信 - Comment削除
+      try {
+        const commentNotificationData: CommentNotificationData = {
+          action: 'delete',
+          comment: {
+            id: existingComment.id,
+            author: existingComment.author,
+            body_md: existingComment.body_md,
+            issue_id: existingComment.issue_id,
+            edited: existingComment.edited,
+          },
+          issue: {
+            id: issue.id,
+            title: issue.title,
+            project_id: issue.project_id,
+          },
+          author: 'system',
+        };
+        
+        await this.notificationGateway.notifyCommentChanged(commentNotificationData);
+      } catch (notificationError) {
+        this.logger.warn(`Failed to send WebSocket notification for comment deletion ${id}: ${notificationError.message}`);
+        // WebSocket通知エラーは Comment削除を阻害しない
       }
 
       this.logger.log(`Comment removed with ID: ${id}`);

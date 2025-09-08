@@ -1,0 +1,38 @@
+[
+  {
+    "id": "comment-1",
+    "issue_id": "test-issue-1",
+    "author": "test-user@example.com",
+    "body_md": "This is the first comment with **bold** text and `code`",
+    "created_at": "2024-01-01T12:00:00Z",
+    "updated_at": "2024-01-01T12:00:00Z",
+    "is_edited": false
+  },
+  {
+    "id": "comment-2",
+    "issue_id": "test-issue-1",
+    "author": "other-user@example.com",
+    "body_md": "Great work! I have some *suggestions* to improve this:\n\n1. Consider adding error handling\n2. Add unit tests\n3. Update documentation",
+    "created_at": "2024-01-01T14:30:00Z",
+    "updated_at": "2024-01-01T15:00:00Z",
+    "is_edited": true
+  },
+  {
+    "id": "comment-3",
+    "issue_id": "test-issue-1",
+    "author": "test-user@example.com",
+    "body_md": "@other-user@example.com Thanks for the feedback! I'll address these points.",
+    "created_at": "2024-01-01T16:00:00Z",
+    "updated_at": "2024-01-01T16:00:00Z",
+    "is_edited": false
+  },
+  {
+    "id": "comment-4",
+    "issue_id": "test-issue-2",
+    "author": "other-user@example.com",
+    "body_md": "Working on this child issue. Should be completed by tomorrow.",
+    "created_at": "2024-01-02T09:30:00Z",
+    "updated_at": "2024-01-02T09:30:00Z",
+    "is_edited": false
+  }
+]
