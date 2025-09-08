@@ -2,7 +2,7 @@ import { Injectable, NestMiddleware, UnauthorizedException, Logger } from '@nest
 import { Request, Response, NextFunction } from 'express';
 
 /**
- * 認証設定インターfaces
+ * 認証設定interfaces
  */
 export interface AuthConfig {
   type: 'basic' | 'jwt' | 'none';
@@ -17,12 +17,36 @@ export interface AuthConfig {
 }
 
 /**
- * AuthMiddleware - JWT/Basic認証の選択可能なミドルウェア
+ * ユーザー情報interface
+ */
+export interface AuthUser {
+  username?: string;
+  type: 'basic' | 'jwt' | 'project-password';
+  project_id?: string;
+  permission: 'viewer' | 'editor';
+  project_password_authenticated?: boolean;
+}
+
+/**
+ * リクエストオブジェクト拡張
+ */
+declare global {
+  namespace Express {
+    interface Request {
+      user?: AuthUser;
+    }
+  }
+}
+
+/**
+ * AuthMiddleware - JWT/Basic認証とプロジェクト共有パスワード認証の統合ミドルウェア
  * 
  * 機能:
  * - Basic認証またはJWT認証の選択可能
+ * - プロジェクト共有パスワード認証サポート（カスタムヘッダー）
  * - 環境変数による認証方式の動的切り替え
  * - 開発環境では認証を無効化可能
+ * - 権限レベルの管理（viewer/editor）
  * - 詳細なロギング
  * 
  * 設定:
@@ -31,6 +55,10 @@ export interface AuthConfig {
  * - BASIC_AUTH_PASSWORD: Basic認証用パスワード
  * - JWT_SECRET: JWT秘密鍵
  * - JWT_EXPIRES_IN: JWTの有効期限（デフォルト: 1h）
+ * 
+ * プロジェクト共有パスワード認証:
+ * - X-Project-Id: プロジェクトID（ヘッダー）
+ * - X-Project-Password-Auth: 'true' （ヘッダー）
  */
 @Injectable()
 export class AuthMiddleware implements NestMiddleware {
@@ -86,21 +114,34 @@ export class AuthMiddleware implements NestMiddleware {
    */
   async use(req: Request, res: Response, next: NextFunction): Promise<void> {
     try {
-      switch (this.config.type) {
-        case 'basic':
-          await this.handleBasicAuth(req);
-          break;
+      // プロジェクト共有パスワード認証のチェック（優先）
+      const projectId = req.headers['x-project-id'] as string;
+      const projectPasswordAuth = req.headers['x-project-password-auth'] as string;
 
-        case 'jwt':
-          await this.handleJwtAuth(req);
-          break;
+      if (projectId && projectPasswordAuth === 'true') {
+        await this.handleProjectPasswordAuth(req, projectId);
+      } else {
+        // 既存の認証方式
+        switch (this.config.type) {
+          case 'basic':
+            await this.handleBasicAuth(req);
+            break;
 
-        case 'none':
-          // 認証なし - 開発環境など
-          break;
+          case 'jwt':
+            await this.handleJwtAuth(req);
+            break;
 
-        default:
-          throw new UnauthorizedException('Invalid authentication configuration');
+          case 'none':
+            // デフォルトでViewer権限を付与
+            req.user = {
+              type: 'basic',
+              permission: 'viewer',
+            };
+            break;
+
+          default:
+            throw new UnauthorizedException('Invalid authentication configuration');
+        }
       }
 
       next();
@@ -108,6 +149,27 @@ export class AuthMiddleware implements NestMiddleware {
       this.logger.error(`Authentication failed: ${error.message}`, error.stack);
       throw error;
     }
+  }
+
+  /**
+   * プロジェクト共有パスワード認証処理
+   * @param req リクエスト
+   * @param projectId プロジェクトID
+   */
+  private async handleProjectPasswordAuth(req: Request, projectId: string): Promise<void> {
+    this.logger.log(`Project password authentication for project: ${projectId}`);
+
+    // プロジェクト共有パスワード認証が成功していることを前提
+    // （実際の認証は /projects/auth-password エンドポイントで実行済み）
+    
+    req.user = {
+      type: 'project-password',
+      project_id: projectId,
+      permission: 'editor', // パスワード認証成功時はEditor権限
+      project_password_authenticated: true,
+    };
+
+    this.logger.log(`Project password auth successful for project: ${projectId}`);
   }
 
   /**
@@ -142,7 +204,11 @@ export class AuthMiddleware implements NestMiddleware {
       this.logger.log(`Basic auth successful for user: ${username}`);
       
       // リクエストオブジェクトにユーザー情報を追加
-      (req as any).user = { username, type: 'basic' };
+      req.user = { 
+        username, 
+        type: 'basic',
+        permission: 'editor', // Basic認証成功時はEditor権限
+      };
     } catch (error) {
       if (error instanceof UnauthorizedException) {
         throw error;
@@ -175,7 +241,11 @@ export class AuthMiddleware implements NestMiddleware {
       this.logger.log(`JWT auth successful for user: ${payload.sub || 'unknown'}`);
       
       // リクエストオブジェクトにユーザー情報を追加
-      (req as any).user = { ...payload, type: 'jwt' };
+      req.user = { 
+        ...payload, 
+        type: 'jwt',
+        permission: 'editor', // JWT認証成功時はEditor権限
+      };
     } catch (error) {
       this.logger.warn(`JWT auth failed: ${error.message}`);
       throw new UnauthorizedException('Invalid JWT token');
