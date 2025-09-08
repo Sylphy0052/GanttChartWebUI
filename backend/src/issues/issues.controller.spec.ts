@@ -94,6 +94,7 @@ describe('IssuesController', () => {
       sort_order: 0,
       labels: ['bug'],
       parent_id: null,
+      project_id: 'project-1',
     };
 
     it('should create an issue successfully', async () => {
