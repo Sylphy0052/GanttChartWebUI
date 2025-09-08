@@ -1,0 +1,22 @@
+FROM node:20-alpine
+
+# Install OpenSSL and other necessary packages for Prisma
+RUN apk add --no-cache openssl openssl-dev
+
+WORKDIR /app
+
+# Prismaを含む依存関係のインストール用にpackage.jsonとprisma/schema.prismaをコピー
+COPY package*.json ./
+COPY prisma ./prisma/
+
+# 全依存関係のインストール（開発依存関係も含める）
+RUN npm ci && npm cache clean --force
+
+# Prismaクライアントの生成
+RUN npx prisma generate
+
+# ポート3001を公開
+EXPOSE 3001
+
+# 開発モードで起動（ボリュームマウントされたコードを使用）
+CMD ["npm", "run", "start:dev"]

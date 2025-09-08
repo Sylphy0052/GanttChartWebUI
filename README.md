@@ -36,20 +36,51 @@ GanttChart WebUIは、プロジェクトの課題(Issue)管理とガントチャ
 
 ## 必要環境
 
+### Docker環境（推奨）
+- Docker 20.10+
+- Docker Compose 2.0+
+
+### ローカル環境
 - Node.js 20+
 - PostgreSQL 15+
 - npm または yarn
 
 ## セットアップ
 
-### 1. リポジトリのクローン
+### Docker を使用した起動（推奨）
+
+```bash
+# リポジトリのクローン
+git clone <repository-url>
+cd GanttChartWebUI
+
+# 環境変数の設定（必要に応じて.envファイルを編集）
+cp .env.example .env
+
+# Docker Composeでアプリケーション全体を起動
+cd infra
+docker compose up -d
+
+# ログの確認
+docker compose logs -f
+```
+
+アプリケーションへのアクセス:
+- アプリケーション: http://localhost:8080 (nginx経由)
+- 直接アクセス（開発時）:
+  - Frontend: http://localhost:3000
+  - Backend API: http://localhost:3001
+
+### ローカル環境でのセットアップ
+
+#### 1. リポジトリのクローン
 
 ```bash
 git clone <repository-url>
 cd GanttChartWebUI
 ```
 
-### 2. Backend セットアップ
+#### 2. Backend セットアップ
 
 ```bash
 cd backend
@@ -69,7 +100,7 @@ npm run prisma:migrate:dev
 npm run start:dev
 ```
 
-### 3. Frontend セットアップ
+#### 3. Frontend セットアップ
 
 ```bash
 cd frontend
@@ -86,7 +117,33 @@ npm run dev
 
 ## 利用可能なスクリプト
 
-### Backend
+### Docker
+
+```bash
+# アプリケーション起動
+docker compose up -d
+
+# アプリケーション停止
+docker compose down
+
+# ログ表示
+docker compose logs -f
+
+# 特定のサービスのログ表示
+docker compose logs -f backend
+docker compose logs -f frontend
+docker compose logs -f postgres
+
+# データベースのリセット（ボリュームも削除）
+docker compose down -v
+docker compose up -d
+
+# コンテナの再ビルド
+docker compose build --no-cache
+docker compose up -d
+```
+
+### Backend（ローカル環境）
 
 ```bash
 # 開発サーバー起動
@@ -120,7 +177,7 @@ npm run prisma:migrate:dev
 npm run prisma:studio
 ```
 
-### Frontend
+### Frontend（ローカル環境）
 
 ```bash
 # 開発サーバー起動

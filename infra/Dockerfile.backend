@@ -1,0 +1,30 @@
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Prismaを含む依存関係のインストール用にpackage.jsonとprisma/schema.prismaをコピー
+COPY package*.json ./
+COPY prisma ./prisma/
+
+# 依存関係のインストール（開発依存関係も含める for build時のnest cli）
+RUN npm ci && npm cache clean --force
+
+# Prismaクライアントの生成
+RUN npx prisma generate
+
+# アプリケーションコードをコピー
+COPY . .
+
+# TypeScriptのビルド
+RUN npm run build
+
+# 非rootユーザーでの実行
+RUN addgroup -g 1001 -S nodejs
+RUN adduser -S nestjs -u 1001
+USER nestjs
+
+# ポート3001を公開
+EXPOSE 3001
+
+# アプリケーションの起動
+CMD ["npm", "run", "start:prod"]

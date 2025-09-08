@@ -35,6 +35,10 @@ yarn-error.log*
 # Production data and backups
 data/
 backups/
+uploads/
+
+# Docker
+logs_archive_*.tar.gz
 
 # Turbo
 .turbo
