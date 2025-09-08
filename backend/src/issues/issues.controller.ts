@@ -11,9 +11,12 @@ import {
   ValidationPipe,
   Logger,
   UseGuards,
+  Patch,
 } from '@nestjs/common';
 import { IssuesService } from './issues.service';
 import { CreateIssueDto, UpdateIssueDto, IssueResponseDto } from './dto';
+import { ReorderIssuesDto } from './dto/reorder-issues.dto';
+import { ChangeHierarchyDto } from './dto/change-hierarchy.dto';
 import { RoleGuard } from '../common/guards/role.guard';
 import { RequireRole } from '../common/decorators/require-role.decorator';
 
@@ -26,6 +29,8 @@ import { RequireRole } from '../common/decorators/require-role.decorator';
  * - POST /projects/:projectId/issues - Issue作成 [editor権限]
  * - PUT /projects/:projectId/issues/:id - Issue更新 [editor権限]
  * - DELETE /projects/:projectId/issues/:id - Issue削除 [editor権限]
+ * - PATCH /issues/reorder - 複数Issue並び替え [editor権限]
+ * - PATCH /issues/:id/hierarchy - Issue階層変更 [editor権限]
  * 
  * 権限管理:
  * - viewer: GET系操作のみ可能
@@ -33,7 +38,7 @@ import { RequireRole } from '../common/decorators/require-role.decorator';
  * 
  * 各エンドポイントには適切なHTTPステータスコードとバリデーションを適用
  */
-@Controller('projects/:projectId/issues')
+@Controller()
 @UseGuards(RoleGuard)
 export class IssuesController {
   private readonly logger = new Logger(IssuesController.name);
@@ -46,7 +51,7 @@ export class IssuesController {
    * @param createIssueDto 作成データ
    * @returns 作成されたIssue
    */
-  @Post()
+  @Post('projects/:projectId/issues')
   @HttpCode(HttpStatus.CREATED)
   @RequireRole('editor')
   async create(
@@ -69,7 +74,7 @@ export class IssuesController {
    * @param projectId プロジェクトID
    * @returns プロジェクト内のIssue一覧
    */
-  @Get()
+  @Get('projects/:projectId/issues')
   @HttpCode(HttpStatus.OK)
   @RequireRole('viewer')
   async findAll(@Param('projectId') projectId: string): Promise<IssueResponseDto[]> {
@@ -87,7 +92,7 @@ export class IssuesController {
    * @param id IssueID
    * @returns Issue詳細
    */
-  @Get(':id')
+  @Get('projects/:projectId/issues/:id')
   @HttpCode(HttpStatus.OK)
   @RequireRole('viewer')
   async findOne(@Param('projectId') projectId: string, @Param('id') id: string): Promise<IssueResponseDto> {
@@ -106,7 +111,7 @@ export class IssuesController {
    * @param updateIssueDto 更新データ
    * @returns 更新されたIssue
    */
-  @Put(':id')
+  @Put('projects/:projectId/issues/:id')
   @HttpCode(HttpStatus.OK)
   @RequireRole('editor')
   async update(
@@ -128,7 +133,7 @@ export class IssuesController {
    * @param projectId プロジェクトID
    * @param id IssueID
    */
-  @Delete(':id')
+  @Delete('projects/:projectId/issues/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
   @RequireRole('editor')
   async remove(@Param('projectId') projectId: string, @Param('id') id: string): Promise<void> {
@@ -137,5 +142,47 @@ export class IssuesController {
     await this.issuesService.remove(id);
     
     this.logger.log(`DELETE /projects/${projectId}/issues/${id} - Issue deleted successfully`);
+  }
+
+  /**
+   * 複数Issue並び替え（sort_order一括更新）
+   * @param reorderIssuesDto 並び替えデータ
+   * @returns 更新されたIssue一覧
+   */
+  @Patch('issues/reorder')
+  @HttpCode(HttpStatus.OK)
+  @RequireRole('editor')
+  async reorderIssues(
+    @Body(new ValidationPipe({ whitelist: true, transform: true }))
+    reorderIssuesDto: ReorderIssuesDto,
+  ): Promise<IssueResponseDto[]> {
+    this.logger.log(`PATCH /issues/reorder - Reordering ${reorderIssuesDto.issues.length} issues`);
+    
+    const result = await this.issuesService.reorderIssues(reorderIssuesDto);
+    
+    this.logger.log(`PATCH /issues/reorder - Successfully reordered ${result.length} issues`);
+    return result;
+  }
+
+  /**
+   * Issue階層変更（親子関係変更）
+   * @param id IssueID
+   * @param changeHierarchyDto 階層変更データ
+   * @returns 更新されたIssue
+   */
+  @Patch('issues/:id/hierarchy')
+  @HttpCode(HttpStatus.OK)
+  @RequireRole('editor')
+  async changeHierarchy(
+    @Param('id') id: string,
+    @Body(new ValidationPipe({ whitelist: true, transform: true }))
+    changeHierarchyDto: ChangeHierarchyDto,
+  ): Promise<IssueResponseDto> {
+    this.logger.log(`PATCH /issues/${id}/hierarchy - Changing hierarchy, new_parent_id: ${changeHierarchyDto.new_parent_id}`);
+    
+    const result = await this.issuesService.changeHierarchy(id, changeHierarchyDto);
+    
+    this.logger.log(`PATCH /issues/${id}/hierarchy - Successfully changed hierarchy: ${result.title}`);
+    return result;
   }
 }

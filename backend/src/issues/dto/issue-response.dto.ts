@@ -64,6 +64,10 @@ export class IssueResponseDto {
   @Expose()
   updated_at: Date;
 
+  // WBS番号（階層構造に基づく自動生成）
+  @Expose()
+  wbs_number: string;
+
   // 階層構造サポート用
   @Expose()
   @Type(() => IssueResponseDto)

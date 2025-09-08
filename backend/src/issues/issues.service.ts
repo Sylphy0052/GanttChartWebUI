@@ -1,24 +1,30 @@
-import { Injectable, Logger, NotFoundException, ConflictException, BadRequestException, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, NotFoundException, BadRequestException, ConflictException, Logger } from '@nestjs/common';
 import { PrismaService } from '../database/prisma.service';
 import { ChangeLogService } from '../changelog/changelog.service';
 import { UploadsService } from '../uploads/uploads.service';
 import { NotificationGateway } from '../websocket/websocket.gateway';
 import { IssueNotificationData } from '../websocket/interfaces/websocket-notification.interface';
 import { CreateIssueDto, UpdateIssueDto, IssueResponseDto } from './dto';
+import { ReorderIssuesDto, ReorderIssueItem } from './dto/reorder-issues.dto';
+import { ChangeHierarchyDto } from './dto/change-hierarchy.dto';
+import { generateWBSNumbers, calculateSingleWBSNumber, WBSIssueData } from './utils/wbs-number.util';
 import { Issue } from '@prisma/client';
 import { plainToClass } from 'class-transformer';
 
 /**
- * IssuesService - Issue管理のビジネスロジック（ChangeLog・WebSocket通知統合版）
+ * IssuesService - Issue管理サービス
  * 
- * 機能:
- * - Issue基本CRUD操作（create, findAll, findOne, update, remove）
- * - 論理削除対応（is_deleted=true）
- * - 階層構造（parent-child関係）の処理
- * - レスポンスDTO変換
+ * 責務:
+ * - Issue CRUD操作（作成・取得・更新・削除）
+ * - 階層構造（親子関係）管理
+ * - WBS番号の自動生成・更新
+ * - 論理削除対応（is_deleted, deleted_at）
  * - ChangeLog自動記録（作成・更新・削除時）
  * - WebSocket通知自動配信（作成・更新・削除時）
  * - ImagePath自動クリーンアップ（削除時）
+ * - Issue並び替え（sort_order一括更新）
+ * - 階層変更（親子関係変更）
+ * - 楽観的排他制御対応
  */
 @Injectable()
 export class IssuesService {
@@ -27,198 +33,202 @@ export class IssuesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly changeLogService: ChangeLogService,
-    @Inject(forwardRef(() => UploadsService))
     private readonly uploadsService: UploadsService,
     private readonly notificationGateway: NotificationGateway,
   ) {}
 
   /**
    * Issue作成
-   * @param createIssueDto 作成データ
+   * @param projectId プロジェクトID
+   * @param createIssueDto Issue作成データ
    * @returns 作成されたIssue
-   * @throws BadRequestException parent_idが無効な場合
-   * @throws NotFoundException 関連するプロジェクトまたは親Issueが存在しない場合
+   * @throws NotFoundException プロジェクトまたは親Issueが存在しない場合
+   * @throws BadRequestException 循環参照が発生する場合
    */
-  async create(createIssueDto: CreateIssueDto): Promise<IssueResponseDto> {
-    this.logger.log(`Creating issue: ${createIssueDto.title}`);
+  async create(projectId: string, createIssueDto: CreateIssueDto): Promise<IssueResponseDto> {
+    this.logger.log(`Creating issue in project: ${projectId}, title: ${createIssueDto.title}`);
 
     try {
-      // プロジェクトの存在確認
+      // プロジェクト存在確認
       const project = await this.prisma.project.findFirst({
-        where: {
-          id: createIssueDto.project_id,
-          is_deleted: false,
-        },
+        where: { id: projectId, is_deleted: false },
       });
 
       if (!project) {
         throw new NotFoundException('指定されたプロジェクトが見つかりません');
       }
 
-      // parent_id が指定されている場合の親Issue検証
+      // 親Issue存在確認（指定されている場合）
       if (createIssueDto.parent_id) {
         const parentIssue = await this.prisma.issue.findFirst({
           where: {
             id: createIssueDto.parent_id,
-            project_id: createIssueDto.project_id, // 同一プロジェクト内であること
+            project_id: projectId,
             is_deleted: false,
           },
         });
 
         if (!parentIssue) {
-          throw new BadRequestException('指定された親Issueが見つかりません、または異なるプロジェクトに所属しています');
+          throw new NotFoundException('指定された親Issueが見つかりません');
         }
       }
 
-      // Issueの作成
-      const issue = await this.prisma.issue.create({
+      // 新しいsort_orderの算出
+      let nextSortOrder = 1;
+      if (createIssueDto.parent_id) {
+        // 同一親の子Issue間での最大sort_order + 10
+        const lastChildIssue = await this.prisma.issue.findFirst({
+          where: {
+            parent_id: createIssueDto.parent_id,
+            project_id: projectId,
+            is_deleted: false,
+          },
+          orderBy: { sort_order: 'desc' },
+        });
+        nextSortOrder = lastChildIssue ? lastChildIssue.sort_order + 10 : 1;
+      } else {
+        // ルートレベルでの最大sort_order + 10
+        const lastRootIssue = await this.prisma.issue.findFirst({
+          where: {
+            parent_id: null,
+            project_id: projectId,
+            is_deleted: false,
+          },
+          orderBy: { sort_order: 'desc' },
+        });
+        nextSortOrder = lastRootIssue ? lastRootIssue.sort_order + 10 : 1;
+      }
+
+      // Issue作成
+      const newIssue = await this.prisma.issue.create({
         data: {
-          project_id: createIssueDto.project_id,
+          project_id: projectId,
           parent_id: createIssueDto.parent_id || null,
           title: createIssueDto.title,
           description_md: createIssueDto.description_md || null,
           assignee: createIssueDto.assignee || null,
           status: createIssueDto.status || 'open',
-          start_date: createIssueDto.start_date ? new Date(createIssueDto.start_date) : null,
-          end_date: createIssueDto.end_date ? new Date(createIssueDto.end_date) : null,
-          progress_pct: createIssueDto.progress_pct || 0,
+          start_date: createIssueDto.start_date || null,
+          end_date: createIssueDto.end_date || null,
+          progress_pct: createIssueDto.progress_pct ?? 0,
           effort_hours: createIssueDto.effort_hours || null,
-          is_blocked: createIssueDto.is_blocked || false,
-          sort_order: createIssueDto.sort_order || 0,
+          is_blocked: createIssueDto.is_blocked ?? false,
+          sort_order: createIssueDto.sort_order ?? nextSortOrder,
           labels: createIssueDto.labels || [],
+          version: 1, // 新規作成時は必ず1
         },
       });
 
-      // ChangeLog記録 - Issue作成
+      // ChangeLog記録 - 作成
       try {
         await this.changeLogService.recordIssueChange(
-          issue.id,
-          {
-            action: 'create',
-            title: issue.title,
-            assignee: issue.assignee,
-            status: issue.status,
-            start_date: issue.start_date,
-            end_date: issue.end_date,
-            progress_pct: issue.progress_pct,
-          },
-          issue.project_id,
-          createIssueDto.assignee || 'system',
+          newIssue.id,
+          { action: 'create' },
+          projectId,
+          'system',
         );
       } catch (changeLogError) {
-        this.logger.warn(`Failed to record change log for issue creation ${issue.id}: ${changeLogError.message}`);
+        this.logger.warn(`Failed to record change log for issue creation ${newIssue.id}: ${changeLogError.message}`);
         // ChangeLog記録エラーは Issue作成を阻害しない
       }
 
-      // WebSocket通知配信 - Issue作成
+      // WebSocket通知配信 - 作成
       try {
         const issueNotificationData: IssueNotificationData = {
           action: 'create',
           issue: {
-            id: issue.id,
-            title: issue.title,
-            description_md: issue.description_md,
-            assignee: issue.assignee,
-            status: issue.status,
-            start_date: issue.start_date,
-            end_date: issue.end_date,
-            progress_pct: issue.progress_pct,
-            project_id: issue.project_id,
-            parent_id: issue.parent_id,
+            id: newIssue.id,
+            title: newIssue.title,
+            description_md: newIssue.description_md,
+            assignee: newIssue.assignee,
+            status: newIssue.status,
+            start_date: newIssue.start_date,
+            end_date: newIssue.end_date,
+            progress_pct: newIssue.progress_pct,
+            project_id: newIssue.project_id,
+            parent_id: newIssue.parent_id,
           },
-          author: createIssueDto.assignee || 'system',
+          author: 'system',
         };
         
         await this.notificationGateway.notifyIssueChanged(issueNotificationData);
       } catch (notificationError) {
-        this.logger.warn(`Failed to send WebSocket notification for issue creation ${issue.id}: ${notificationError.message}`);
+        this.logger.warn(`Failed to send WebSocket notification for issue creation ${newIssue.id}: ${notificationError.message}`);
         // WebSocket通知エラーは Issue作成を阻害しない
       }
 
-      this.logger.log(`Issue created successfully: ${issue.id}`);
-      return this.toResponseDto(issue);
+      this.logger.log(`Issue created successfully: ${newIssue.id}`);
+      return this.toResponseDto(newIssue, projectId);
     } catch (error) {
-      this.logger.error(`Failed to create issue: ${error.message}`, error);
+      this.logger.error(`Failed to create issue in project ${projectId}: ${error.message}`, error);
       throw error;
     }
   }
 
   /**
-   * プロジェクト内Issue一覧取得
+   * プロジェクト内の全Issue取得
    * @param projectId プロジェクトID
-   * @returns プロジェクト内のIssue一覧（論理削除済み除外）
+   * @returns Issue一覧（WBS番号付き）
    * @throws NotFoundException プロジェクトが存在しない場合
    */
-  async findAll(projectId: string): Promise<IssueResponseDto[]> {
-    this.logger.log(`Finding all issues for project: ${projectId}`);
+  async findAllByProject(projectId: string): Promise<IssueResponseDto[]> {
+    this.logger.log(`Finding all issues in project: ${projectId}`);
 
     try {
-      // プロジェクトの存在確認
+      // プロジェクト存在確認
       const project = await this.prisma.project.findFirst({
-        where: {
-          id: projectId,
-          is_deleted: false,
-        },
+        where: { id: projectId, is_deleted: false },
       });
 
       if (!project) {
         throw new NotFoundException('指定されたプロジェクトが見つかりません');
       }
 
-      // プロジェクト内のIssue一覧を取得（論理削除済み除外）
+      // プロジェクト内の全Issue取得
       const issues = await this.prisma.issue.findMany({
         where: {
           project_id: projectId,
           is_deleted: false,
         },
-        include: {
-          children: {
-            where: {
-              is_deleted: false,
-            },
-          },
-          parent: true,
-        },
         orderBy: [
+          { parent_id: { sort: 'asc', nulls: 'first' } },
           { sort_order: 'asc' },
-          { created_at: 'desc' },
         ],
       });
 
-      this.logger.log(`Found ${issues.length} issues for project: ${projectId}`);
-      return issues.map(issue => this.toResponseDto(issue));
+      this.logger.log(`Found ${issues.length} issues in project: ${projectId}`);
+      return this.toResponseDtoList(issues, projectId);
     } catch (error) {
-      this.logger.error(`Failed to find issues for project ${projectId}: ${error.message}`, error);
+      this.logger.error(`Failed to find issues in project ${projectId}: ${error.message}`, error);
       throw error;
     }
   }
 
   /**
-   * 単一Issue取得
-   * @param id IssueID
-   * @returns Issue詳細（階層情報含む）
-   * @throws NotFoundException Issueが存在しない、または論理削除済みの場合
+   * Issue詳細取得
+   * @param projectId プロジェクトID
+   * @param issueId IssueID
+   * @returns Issue詳細（WBS番号付き）
+   * @throws NotFoundException Issueが存在しない場合
    */
-  async findOne(id: string): Promise<IssueResponseDto> {
-    this.logger.log(`Finding issue by id: ${id}`);
+  async findOne(projectId: string, issueId: string): Promise<IssueResponseDto> {
+    this.logger.log(`Finding issue: ${issueId} in project: ${projectId}`);
 
     try {
       const issue = await this.prisma.issue.findFirst({
         where: {
-          id,
+          id: issueId,
+          project_id: projectId,
           is_deleted: false,
         },
         include: {
           children: {
-            where: {
-              is_deleted: false,
-            },
-            orderBy: [
-              { sort_order: 'asc' },
-              { created_at: 'desc' },
-            ],
+            where: { is_deleted: false },
+            orderBy: { sort_order: 'asc' },
           },
-          parent: true,
+          parent: {
+            where: { is_deleted: false },
+          },
         },
       });
 
@@ -226,58 +236,38 @@ export class IssuesService {
         throw new NotFoundException('指定されたIssueが見つかりません');
       }
 
-      this.logger.log(`Found issue: ${issue.id} - ${issue.title}`);
-      return this.toResponseDto(issue);
+      this.logger.log(`Found issue: ${issueId}`);
+      return this.toResponseDto(issue, projectId);
     } catch (error) {
-      this.logger.error(`Failed to find issue ${id}: ${error.message}`, error);
+      this.logger.error(`Failed to find issue ${issueId} in project ${projectId}: ${error.message}`, error);
       throw error;
     }
   }
 
   /**
    * Issue更新
-   * @param id IssueID
+   * @param projectId プロジェクトID
+   * @param issueId IssueID
    * @param updateIssueDto 更新データ
-   * @returns 更新されたIssue
-   * @throws NotFoundException Issueが存在しない、または論理削除済みの場合
-   * @throws BadRequestException parent_idが無効な場合
+   * @returns 更新されたIssue（WBS番号付き）
+   * @throws NotFoundException Issueが存在しない場合
    * @throws ConflictException 楽観的排他制御エラー
    */
-  async update(id: string, updateIssueDto: UpdateIssueDto): Promise<IssueResponseDto> {
-    this.logger.log(`Updating issue: ${id}`);
+  async update(projectId: string, issueId: string, updateIssueDto: UpdateIssueDto): Promise<IssueResponseDto> {
+    this.logger.log(`Updating issue: ${issueId} in project: ${projectId}`);
 
     try {
-      // 既存Issueの存在確認
+      // 既存Issue取得・検証
       const existingIssue = await this.prisma.issue.findFirst({
         where: {
-          id,
+          id: issueId,
+          project_id: projectId,
           is_deleted: false,
         },
       });
 
       if (!existingIssue) {
         throw new NotFoundException('指定されたIssueが見つかりません');
-      }
-
-      // parent_id が指定されている場合の検証
-      if (updateIssueDto.parent_id !== undefined) {
-        if (updateIssueDto.parent_id === id) {
-          throw new BadRequestException('自分自身を親Issueに設定することはできません');
-        }
-
-        if (updateIssueDto.parent_id) {
-          const parentIssue = await this.prisma.issue.findFirst({
-            where: {
-              id: updateIssueDto.parent_id,
-              project_id: existingIssue.project_id, // 同一プロジェクト内であること
-              is_deleted: false,
-            },
-          });
-
-          if (!parentIssue) {
-            throw new BadRequestException('指定された親Issueが見つかりません、または異なるプロジェクトに所属しています');
-          }
-        }
       }
 
       // 更新前の値を記録（ChangeLog用）
@@ -289,140 +279,116 @@ export class IssuesService {
         start_date: existingIssue.start_date,
         end_date: existingIssue.end_date,
         progress_pct: existingIssue.progress_pct,
-        effort_hours: existingIssue.effort_hours,
-        is_blocked: existingIssue.is_blocked,
-        sort_order: existingIssue.sort_order,
-        labels: existingIssue.labels,
-        parent_id: existingIssue.parent_id,
       };
 
-      // 更新データの準備
-      const updateData: any = {};
-      
-      if (updateIssueDto.title !== undefined) updateData.title = updateIssueDto.title;
-      if (updateIssueDto.description_md !== undefined) updateData.description_md = updateIssueDto.description_md;
-      if (updateIssueDto.assignee !== undefined) updateData.assignee = updateIssueDto.assignee;
-      if (updateIssueDto.status !== undefined) updateData.status = updateIssueDto.status;
-      if (updateIssueDto.start_date !== undefined) {
-        updateData.start_date = updateIssueDto.start_date ? new Date(updateIssueDto.start_date) : null;
-      }
-      if (updateIssueDto.end_date !== undefined) {
-        updateData.end_date = updateIssueDto.end_date ? new Date(updateIssueDto.end_date) : null;
-      }
-      if (updateIssueDto.progress_pct !== undefined) updateData.progress_pct = updateIssueDto.progress_pct;
-      if (updateIssueDto.effort_hours !== undefined) updateData.effort_hours = updateIssueDto.effort_hours;
-      if (updateIssueDto.is_blocked !== undefined) updateData.is_blocked = updateIssueDto.is_blocked;
-      if (updateIssueDto.sort_order !== undefined) updateData.sort_order = updateIssueDto.sort_order;
-      if (updateIssueDto.labels !== undefined) updateData.labels = updateIssueDto.labels;
-      if (updateIssueDto.parent_id !== undefined) updateData.parent_id = updateIssueDto.parent_id || null;
-
-      // 楽観的排他制御を使用してIssueを更新
+      // 楽観的排他制御を使用して更新
       const updatedIssue = await this.prisma.issue.update({
         where: {
-          id,
-          version: existingIssue.version, // 楽観的排他制御
+          id: issueId,
+          version: updateIssueDto.version, // 楽観的排他制御
         },
         data: {
-          ...updateData,
+          title: updateIssueDto.title ?? existingIssue.title,
+          description_md: updateIssueDto.description_md !== undefined 
+            ? updateIssueDto.description_md 
+            : existingIssue.description_md,
+          assignee: updateIssueDto.assignee !== undefined 
+            ? updateIssueDto.assignee 
+            : existingIssue.assignee,
+          status: updateIssueDto.status ?? existingIssue.status,
+          start_date: updateIssueDto.start_date !== undefined 
+            ? updateIssueDto.start_date 
+            : existingIssue.start_date,
+          end_date: updateIssueDto.end_date !== undefined 
+            ? updateIssueDto.end_date 
+            : existingIssue.end_date,
+          progress_pct: updateIssueDto.progress_pct ?? existingIssue.progress_pct,
+          effort_hours: updateIssueDto.effort_hours !== undefined 
+            ? updateIssueDto.effort_hours 
+            : existingIssue.effort_hours,
+          is_blocked: updateIssueDto.is_blocked ?? existingIssue.is_blocked,
+          sort_order: updateIssueDto.sort_order ?? existingIssue.sort_order,
+          labels: updateIssueDto.labels ?? existingIssue.labels,
           version: { increment: 1 }, // バージョンをインクリメント
         },
       });
 
-      // ChangeLog記録 - 変更差分のみ記録
+      // ChangeLog記録 - 更新
       try {
-        const changes: Record<string, any> = { action: 'update' };
-        let hasChanges = false;
-
-        Object.keys(updateData).forEach(key => {
-          if (key !== 'version' && previousValues[key] !== updateData[key]) {
-            changes[`${key}_from`] = previousValues[key];
-            changes[`${key}_to`] = updateData[key];
-            hasChanges = true;
-          }
-        });
-
-        if (hasChanges) {
-          await this.changeLogService.recordIssueChange(
-            updatedIssue.id,
-            changes,
-            updatedIssue.project_id,
-            updateIssueDto.assignee || existingIssue.assignee || 'system',
-          );
-        }
+        await this.changeLogService.recordIssueChange(
+          issueId,
+          {
+            action: 'update',
+            title_from: previousValues.title,
+            title_to: updatedIssue.title,
+            status_from: previousValues.status,
+            status_to: updatedIssue.status,
+            assignee_from: previousValues.assignee,
+            assignee_to: updatedIssue.assignee,
+            progress_pct_from: previousValues.progress_pct,
+            progress_pct_to: updatedIssue.progress_pct,
+          },
+          projectId,
+          'system',
+        );
       } catch (changeLogError) {
-        this.logger.warn(`Failed to record change log for issue update ${id}: ${changeLogError.message}`);
+        this.logger.warn(`Failed to record change log for issue update ${issueId}: ${changeLogError.message}`);
         // ChangeLog記録エラーは Issue更新を阻害しない
       }
 
-      // WebSocket通知配信 - Issue更新（変更があった場合のみ）
+      // WebSocket通知配信 - 更新
       try {
-        let hasChanges = false;
-        Object.keys(updateData).forEach(key => {
-          if (key !== 'version' && previousValues[key] !== updateData[key]) {
-            hasChanges = true;
-          }
-        });
-
-        if (hasChanges) {
-          const issueNotificationData: IssueNotificationData = {
-            action: 'update',
-            issue: {
-              id: updatedIssue.id,
-              title: updatedIssue.title,
-              description_md: updatedIssue.description_md,
-              assignee: updatedIssue.assignee,
-              status: updatedIssue.status,
-              start_date: updatedIssue.start_date,
-              end_date: updatedIssue.end_date,
-              progress_pct: updatedIssue.progress_pct,
-              project_id: updatedIssue.project_id,
-              parent_id: updatedIssue.parent_id,
-            },
-            author: updateIssueDto.assignee || existingIssue.assignee || 'system',
-          };
-          
-          await this.notificationGateway.notifyIssueChanged(issueNotificationData);
-        }
+        const issueNotificationData: IssueNotificationData = {
+          action: 'update',
+          issue: {
+            id: updatedIssue.id,
+            title: updatedIssue.title,
+            description_md: updatedIssue.description_md,
+            assignee: updatedIssue.assignee,
+            status: updatedIssue.status,
+            start_date: updatedIssue.start_date,
+            end_date: updatedIssue.end_date,
+            progress_pct: updatedIssue.progress_pct,
+            project_id: updatedIssue.project_id,
+            parent_id: updatedIssue.parent_id,
+          },
+          author: 'system',
+        };
+        
+        await this.notificationGateway.notifyIssueChanged(issueNotificationData);
       } catch (notificationError) {
-        this.logger.warn(`Failed to send WebSocket notification for issue update ${id}: ${notificationError.message}`);
+        this.logger.warn(`Failed to send WebSocket notification for issue update ${issueId}: ${notificationError.message}`);
         // WebSocket通知エラーは Issue更新を阻害しない
       }
 
-      this.logger.log(`Issue updated successfully: ${updatedIssue.id}`);
-      return this.toResponseDto(updatedIssue);
+      this.logger.log(`Issue updated successfully: ${issueId}`);
+      return this.toResponseDto(updatedIssue, projectId);
     } catch (error) {
       if (error.code === 'P2025') {
         // Prismaの「Record to update not found」エラー（楽観的排他制御エラー）
         throw new ConflictException('Issueが他のユーザーによって更新されています。最新データを取得してから再度更新してください');
       }
-      this.logger.error(`Failed to update issue ${id}: ${error.message}`, error);
+      this.logger.error(`Failed to update issue ${issueId} in project ${projectId}: ${error.message}`, error);
       throw error;
     }
   }
 
   /**
-   * Issue論理削除（ImagePathクリーンアップ・WebSocket通知統合版）
-   * @param id IssueID
-   * @returns 削除処理結果
-   * @throws NotFoundException Issueが存在しない、または既に論理削除済みの場合
-   * @throws ConflictException 子Issueが存在する場合
+   * Issue削除（論理削除）
+   * @param projectId プロジェクトID
+   * @param issueId IssueID
+   * @throws NotFoundException Issueが存在しない場合
    */
-  async remove(id: string): Promise<{ message: string }> {
-    this.logger.log(`Removing issue: ${id}`);
+  async remove(projectId: string, issueId: string): Promise<{ message: string }> {
+    this.logger.log(`Removing issue: ${issueId} from project: ${projectId}`);
 
     try {
-      // 既存Issueの存在確認
+      // 既存Issue検証
       const existingIssue = await this.prisma.issue.findFirst({
         where: {
-          id,
+          id: issueId,
+          project_id: projectId,
           is_deleted: false,
-        },
-        include: {
-          children: {
-            where: {
-              is_deleted: false,
-            },
-          },
         },
       });
 
@@ -430,28 +396,9 @@ export class IssuesService {
         throw new NotFoundException('指定されたIssueが見つかりません');
       }
 
-      // 子Issueが存在する場合は削除を拒否
-      if (existingIssue.children && existingIssue.children.length > 0) {
-        throw new ConflictException('子Issueが存在するため削除できません。先に子Issueを削除してください');
-      }
-
-      // Issue関連画像の削除（ImagePathクリーンアップ）
-      try {
-        const images = await this.uploadsService.getImagesByIssue(id);
-        for (const image of images) {
-          await this.uploadsService.deleteImage(image.id);
-          this.logger.log(`Deleted image ${image.id} for issue ${id}`);
-        }
-      } catch (imageCleanupError) {
-        this.logger.warn(`Failed to cleanup images for issue ${id}: ${imageCleanupError.message}`);
-        // 画像削除エラーはIssue削除を阻害しない
-      }
-
-      // 論理削除の実行
+      // 論理削除実行
       await this.prisma.issue.update({
-        where: {
-          id,
-        },
+        where: { id: issueId },
         data: {
           is_deleted: true,
           deleted_at: new Date(),
@@ -459,24 +406,31 @@ export class IssuesService {
         },
       });
 
-      // ChangeLog記録 - Issue削除
+      // Issue添付画像の削除（物理削除）
+      try {
+        const images = await this.uploadsService.getImagesByIssue(issueId);
+        for (const image of images) {
+          await this.uploadsService.deleteImage(image.id);
+        }
+      } catch (imageError) {
+        this.logger.warn(`Failed to delete images for issue ${issueId}: ${imageError.message}`);
+        // 画像削除エラーは Issue削除を阻害しない
+      }
+
+      // ChangeLog記録 - 削除
       try {
         await this.changeLogService.recordIssueChange(
-          id,
-          {
-            action: 'delete',
-            title: existingIssue.title,
-            deleted_at: new Date(),
-          },
-          existingIssue.project_id,
+          issueId,
+          { action: 'delete' },
+          projectId,
           'system',
         );
       } catch (changeLogError) {
-        this.logger.warn(`Failed to record change log for issue deletion ${id}: ${changeLogError.message}`);
+        this.logger.warn(`Failed to record change log for issue deletion ${issueId}: ${changeLogError.message}`);
         // ChangeLog記録エラーは Issue削除を阻害しない
       }
 
-      // WebSocket通知配信 - Issue削除
+      // WebSocket通知配信 - 削除
       try {
         const issueNotificationData: IssueNotificationData = {
           action: 'delete',
@@ -497,24 +451,396 @@ export class IssuesService {
         
         await this.notificationGateway.notifyIssueChanged(issueNotificationData);
       } catch (notificationError) {
-        this.logger.warn(`Failed to send WebSocket notification for issue deletion ${id}: ${notificationError.message}`);
+        this.logger.warn(`Failed to send WebSocket notification for issue deletion ${issueId}: ${notificationError.message}`);
         // WebSocket通知エラーは Issue削除を阻害しない
       }
 
-      this.logger.log(`Issue removed successfully: ${id}`);
+      this.logger.log(`Issue removed successfully: ${issueId}`);
       return { message: 'Issueが正常に削除されました' };
     } catch (error) {
-      this.logger.error(`Failed to remove issue ${id}: ${error.message}`, error);
+      this.logger.error(`Failed to remove issue ${issueId}: ${error.message}`, error);
       throw error;
     }
   }
 
   /**
-   * IssueをIssueResponseDTOに変換
+   * 複数Issue並び替え（sort_order一括更新）
+   * @param reorderIssuesDto 並び替えデータ
+   * @returns 更新されたIssue一覧
+   * @throws NotFoundException 対象Issueが存在しない場合
+   * @throws ConflictException 楽観的排他制御エラー
+   * @throws BadRequestException 空配列または重複IDの場合
+   */
+  async reorderIssues(reorderIssuesDto: ReorderIssuesDto): Promise<IssueResponseDto[]> {
+    this.logger.log(`Reordering ${reorderIssuesDto.issues.length} issues`);
+
+    if (reorderIssuesDto.issues.length === 0) {
+      throw new BadRequestException('並び替え対象のIssueが指定されていません');
+    }
+
+    try {
+      // 重複IDチェック
+      const issueIds = reorderIssuesDto.issues.map(item => item.id);
+      const uniqueIds = [...new Set(issueIds)];
+      if (uniqueIds.length !== issueIds.length) {
+        throw new BadRequestException('重複したIssue IDが含まれています');
+      }
+
+      const updatedIssues: IssueResponseDto[] = [];
+      let projectId: string | null = null;
+
+      // トランザクション内で一括更新
+      await this.prisma.$transaction(async (prisma) => {
+        for (const item of reorderIssuesDto.issues) {
+          // 既存Issueの取得・検証
+          const existingIssue = await prisma.issue.findFirst({
+            where: {
+              id: item.id,
+              is_deleted: false,
+            },
+          });
+
+          if (!existingIssue) {
+            throw new NotFoundException(`指定されたIssue ${item.id} が見つかりません`);
+          }
+
+          // プロジェクトIDを統一チェック（最初のもので固定）
+          if (!projectId) {
+            projectId = existingIssue.project_id;
+          } else if (projectId !== existingIssue.project_id) {
+            throw new BadRequestException('異なるプロジェクトのIssueが混在しています');
+          }
+
+          // 楽観的排他制御を使用して更新
+          const updatedIssue = await prisma.issue.update({
+            where: {
+              id: item.id,
+              version: item.version, // 楽観的排他制御
+            },
+            data: {
+              sort_order: item.sort_order,
+              version: { increment: 1 }, // バージョンをインクリメント
+            },
+          });
+
+          updatedIssues.push(this.toResponseDto(updatedIssue, projectId));
+        }
+      });
+
+      // ChangeLog記録 - 並び替え操作
+      try {
+        for (let i = 0; i < reorderIssuesDto.issues.length; i++) {
+          const item = reorderIssuesDto.issues[i];
+          const updatedIssue = updatedIssues[i];
+          
+          await this.changeLogService.recordIssueChange(
+            item.id,
+            {
+              action: 'reorder',
+              sort_order_to: item.sort_order,
+            },
+            projectId!,
+            'system',
+          );
+        }
+      } catch (changeLogError) {
+        this.logger.warn(`Failed to record change log for issue reorder: ${changeLogError.message}`);
+        // ChangeLog記録エラーは 並び替えを阻害しない
+      }
+
+      // WebSocket通知配信 - 並び替え操作
+      try {
+        for (const updatedIssue of updatedIssues) {
+          const issueNotificationData: IssueNotificationData = {
+            action: 'update',
+            issue: {
+              id: updatedIssue.id,
+              title: updatedIssue.title,
+              description_md: updatedIssue.description_md,
+              assignee: updatedIssue.assignee,
+              status: updatedIssue.status,
+              start_date: updatedIssue.start_date,
+              end_date: updatedIssue.end_date,
+              progress_pct: updatedIssue.progress_pct,
+              project_id: updatedIssue.project_id,
+              parent_id: updatedIssue.parent_id,
+            },
+            author: 'system',
+          };
+          
+          await this.notificationGateway.notifyIssueChanged(issueNotificationData);
+        }
+      } catch (notificationError) {
+        this.logger.warn(`Failed to send WebSocket notification for issue reorder: ${notificationError.message}`);
+        // WebSocket通知エラーは 並び替えを阻害しない
+      }
+
+      this.logger.log(`Successfully reordered ${updatedIssues.length} issues`);
+      return updatedIssues;
+    } catch (error) {
+      if (error.code === 'P2025') {
+        // Prismaの「Record to update not found」エラー（楽観的排他制御エラー）
+        throw new ConflictException('Issueが他のユーザーによって更新されています。最新データを取得してから再度並び替えしてください');
+      }
+      this.logger.error(`Failed to reorder issues: ${error.message}`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * Issue階層変更（親子関係変更）
+   * @param id IssueID
+   * @param changeHierarchyDto 階層変更データ
+   * @returns 更新されたIssue
+   * @throws NotFoundException Issueまたは親Issueが存在しない場合
+   * @throws BadRequestException 循環参照または同一プロジェクト外の親を指定した場合
+   * @throws ConflictException 楽観的排他制御エラー
+   */
+  async changeHierarchy(id: string, changeHierarchyDto: ChangeHierarchyDto): Promise<IssueResponseDto> {
+    this.logger.log(`Changing hierarchy for issue: ${id}, new_parent_id: ${changeHierarchyDto.new_parent_id}`);
+
+    try {
+      // 既存Issueの取得・検証
+      const existingIssue = await this.prisma.issue.findFirst({
+        where: {
+          id,
+          is_deleted: false,
+        },
+        include: {
+          children: {
+            where: {
+              is_deleted: false,
+            },
+            select: { id: true },
+          },
+        },
+      });
+
+      if (!existingIssue) {
+        throw new NotFoundException('指定されたIssueが見つかりません');
+      }
+
+      // 新しい親Issueの検証
+      if (changeHierarchyDto.new_parent_id) {
+        // 自分自身を親にしようとした場合
+        if (changeHierarchyDto.new_parent_id === id) {
+          throw new BadRequestException('自分自身を親Issueに設定することはできません');
+        }
+
+        // 親Issueの存在確認
+        const newParentIssue = await this.prisma.issue.findFirst({
+          where: {
+            id: changeHierarchyDto.new_parent_id,
+            is_deleted: false,
+          },
+        });
+
+        if (!newParentIssue) {
+          throw new NotFoundException('指定された親Issueが見つかりません');
+        }
+
+        // 同一プロジェクト内チェック
+        if (newParentIssue.project_id !== existingIssue.project_id) {
+          throw new BadRequestException('異なるプロジェクトのIssueを親として設定することはできません');
+        }
+
+        // 循環参照チェック - 子孫Issueが新しい親になろうとしていないかチェック
+        const isCircularReference = await this.checkCircularReference(
+          changeHierarchyDto.new_parent_id,
+          id,
+        );
+
+        if (isCircularReference) {
+          throw new BadRequestException('循環参照が発生するため、この親子関係を設定できません');
+        }
+      }
+
+      // 更新前の値を記録
+      const previousParentId = existingIssue.parent_id;
+
+      // 楽観的排他制御を使用してIssue階層を更新
+      const updatedIssue = await this.prisma.issue.update({
+        where: {
+          id,
+          version: changeHierarchyDto.version, // 楽観的排他制御
+        },
+        data: {
+          parent_id: changeHierarchyDto.new_parent_id || null,
+          version: { increment: 1 }, // バージョンをインクリメント
+        },
+      });
+
+      // ChangeLog記録 - 階層変更
+      try {
+        await this.changeLogService.recordIssueChange(
+          id,
+          {
+            action: 'change_hierarchy',
+            parent_id_from: previousParentId,
+            parent_id_to: changeHierarchyDto.new_parent_id || null,
+          },
+          existingIssue.project_id,
+          'system',
+        );
+      } catch (changeLogError) {
+        this.logger.warn(`Failed to record change log for hierarchy change ${id}: ${changeLogError.message}`);
+        // ChangeLog記録エラーは 階層変更を阻害しない
+      }
+
+      // WebSocket通知配信 - 階層変更
+      try {
+        const issueNotificationData: IssueNotificationData = {
+          action: 'update',
+          issue: {
+            id: updatedIssue.id,
+            title: updatedIssue.title,
+            description_md: updatedIssue.description_md,
+            assignee: updatedIssue.assignee,
+            status: updatedIssue.status,
+            start_date: updatedIssue.start_date,
+            end_date: updatedIssue.end_date,
+            progress_pct: updatedIssue.progress_pct,
+            project_id: updatedIssue.project_id,
+            parent_id: updatedIssue.parent_id,
+          },
+          author: 'system',
+        };
+        
+        await this.notificationGateway.notifyIssueChanged(issueNotificationData);
+      } catch (notificationError) {
+        this.logger.warn(`Failed to send WebSocket notification for hierarchy change ${id}: ${notificationError.message}`);
+        // WebSocket通知エラーは 階層変更を阻害しない
+      }
+
+      this.logger.log(`Successfully changed hierarchy for issue: ${id}`);
+      return this.toResponseDto(updatedIssue, existingIssue.project_id);
+    } catch (error) {
+      if (error.code === 'P2025') {
+        // Prismaの「Record to update not found」エラー（楽観的排他制御エラー）
+        throw new ConflictException('Issueが他のユーザーによって更新されています。最新データを取得してから再度階層変更してください');
+      }
+      this.logger.error(`Failed to change hierarchy for issue ${id}: ${error.message}`, error);
+      throw error;
+    }
+  }
+
+  /**
+   * 循環参照チェック（再帰的に親→祖先を辿る）
+   * @param candidateParentId 新しい親候補のID
+   * @param targetIssueId 変更対象IssueID
+   * @returns 循環参照が発生する場合はtrue
+   */
+  private async checkCircularReference(candidateParentId: string, targetIssueId: string): Promise<boolean> {
+    let currentParentId = candidateParentId;
+    const visitedIds = new Set<string>();
+
+    while (currentParentId) {
+      // 無限ループ回避
+      if (visitedIds.has(currentParentId)) {
+        this.logger.warn(`Detected existing circular reference at: ${currentParentId}`);
+        return true;
+      }
+      visitedIds.add(currentParentId);
+
+      // 対象IssueIDに到達した場合は循環参照
+      if (currentParentId === targetIssueId) {
+        return true;
+      }
+
+      // 親の親を取得
+      const parentIssue = await this.prisma.issue.findFirst({
+        where: {
+          id: currentParentId,
+          is_deleted: false,
+        },
+        select: {
+          parent_id: true,
+        },
+      });
+
+      if (!parentIssue) {
+        break; // 親が見つからない場合は終了
+      }
+
+      currentParentId = parentIssue.parent_id;
+    }
+
+    return false;
+  }
+
+  /**
+   * 複数IssueをIssueResponseDTOリストに変換（WBS番号付き）
+   * @param issues Issueエンティティ配列
+   * @param projectId プロジェクトID
+   * @returns IssueResponseDTOリスト
+   */
+  private toResponseDtoList(issues: Issue[], projectId: string): IssueResponseDto[] {
+    // WBS番号生成用データを準備
+    const wbsData: WBSIssueData[] = issues.map(issue => ({
+      id: issue.id,
+      parent_id: issue.parent_id,
+      sort_order: issue.sort_order,
+    }));
+
+    // WBS番号を生成
+    const wbsResults = generateWBSNumbers(wbsData);
+    const wbsMap = new Map(wbsResults.map(result => [result.id, result.wbs_number]));
+
+    // DTOに変換してWBS番号を付与
+    return issues.map(issue => {
+      const dto = plainToClass(IssueResponseDto, {
+        id: issue.id,
+        project_id: issue.project_id,
+        parent_id: issue.parent_id,
+        title: issue.title,
+        description_md: issue.description_md,
+        assignee: issue.assignee,
+        status: issue.status,
+        start_date: issue.start_date,
+        end_date: issue.end_date,
+        progress_pct: issue.progress_pct,
+        effort_hours: issue.effort_hours,
+        is_blocked: issue.is_blocked,
+        sort_order: issue.sort_order,
+        labels: issue.labels,
+        version: issue.version,
+        created_at: issue.created_at,
+        updated_at: issue.updated_at,
+        wbs_number: wbsMap.get(issue.id) || '1', // フォールバック
+      });
+      return dto;
+    });
+  }
+
+  /**
+   * IssueをIssueResponseDTOに変換（WBS番号付き）
    * @param issue Issueエンティティ
+   * @param projectId プロジェクトID
    * @returns IssueResponseDTO
    */
-  private toResponseDto(issue: Issue): IssueResponseDto {
+  private async toResponseDto(issue: Issue, projectId: string): Promise<IssueResponseDto> {
+    // プロジェクト内の全Issue取得（WBS番号算出用）
+    const allIssues = await this.prisma.issue.findMany({
+      where: {
+        project_id: projectId,
+        is_deleted: false,
+      },
+      select: {
+        id: true,
+        parent_id: true,
+        sort_order: true,
+      },
+    });
+
+    const wbsData: WBSIssueData[] = allIssues.map(i => ({
+      id: i.id,
+      parent_id: i.parent_id,
+      sort_order: i.sort_order,
+    }));
+
+    // 対象IssueのWBS番号を計算
+    const wbsNumber = calculateSingleWBSNumber(issue.id, wbsData) || '1';
+
     return plainToClass(IssueResponseDto, {
       id: issue.id,
       project_id: issue.project_id,
@@ -533,6 +859,7 @@ export class IssuesService {
       version: issue.version,
       created_at: issue.created_at,
       updated_at: issue.updated_at,
+      wbs_number: wbsNumber,
     });
   }
 }
