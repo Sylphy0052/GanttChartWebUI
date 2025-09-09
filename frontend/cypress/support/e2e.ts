@@ -1,5 +1,8 @@
 /// <reference types="cypress" />
 
+// Import WBS-specific custom commands
+import './wbs-commands'
+
 // Add custom commands and support utilities here
 
 declare global {

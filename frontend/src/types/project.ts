@@ -10,14 +10,14 @@ export type Project = {
 
 export type ProjectCreateDto = {
   name: string;
-  description?: string;
-  shared_password?: string;
+  description_md?: string;
+  shared_password_hash?: string;
 };
 
 export type ProjectUpdateDto = {
   name?: string;
-  description?: string;
-  shared_password?: string;
+  description_md?: string;
+  shared_password_hash?: string;
 };
 
 export type PasswordVerificationDto = {

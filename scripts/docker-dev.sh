@@ -109,6 +109,51 @@ clean_services() {
     fi
 }
 
+# 完全リセット（クリーンアップ、キャッシュクリア、再ビルド、再起動）
+reset_services() {
+    log_warn "This will completely reset the Docker environment!"
+    log_warn "All data will be lost and services will be rebuilt from scratch."
+    read -p "Are you sure? (y/N): " -n 1 -r
+    echo
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        log_info "Starting complete reset..."
+        
+        # 1. すべてのコンテナを停止・削除
+        log_info "Stopping and removing containers..."
+        docker compose -f $COMPOSE_FILE --env-file .env down -v --remove-orphans
+        
+        # 2. Next.jsキャッシュをクリア
+        log_info "Clearing Next.js cache..."
+        rm -rf frontend/.next 2>/dev/null || true
+        rm -rf frontend/node_modules/.cache 2>/dev/null || true
+        
+        # 3. アップロードとログディレクトリをクリア
+        log_info "Clearing uploads and logs..."
+        rm -rf uploads/* 2>/dev/null || true
+        rm -rf logs/* 2>/dev/null || true
+        
+        # 4. Dockerイメージを削除
+        log_info "Removing Docker images..."
+        docker compose -f $COMPOSE_FILE --env-file .env down --rmi local
+        
+        # 5. Dockerシステムをクリーンアップ
+        log_info "Cleaning Docker system..."
+        docker system prune -af --volumes
+        
+        # 6. イメージを再ビルド
+        log_info "Rebuilding Docker images..."
+        docker compose -f $COMPOSE_FILE --env-file .env build --no-cache
+        
+        # 7. サービスを起動
+        log_info "Starting services..."
+        start_services
+        
+        log_info "Reset completed successfully!"
+    else
+        log_info "Reset cancelled"
+    fi
+}
+
 # イメージのリビルド
 rebuild_services() {
     log_info "Rebuilding Docker images..."
@@ -129,6 +174,7 @@ show_help() {
     echo "  logs      - Show logs for all services"
     echo "  logs <service> - Show logs for specific service"
     echo "  clean     - Stop services and remove volumes"
+    echo "  reset     - Complete reset: clean, rebuild, and restart"
     echo "  build     - Rebuild Docker images"
     echo "  help      - Show this help message"
     echo ""
@@ -137,6 +183,7 @@ show_help() {
     echo "  $0 logs backend"
     echo "  $0 logs frontend"
     echo "  $0 logs postgres"
+    echo "  $0 reset    # Complete reset with fresh start"
 }
 
 # メイン処理
@@ -158,6 +205,9 @@ main() {
             ;;
         clean)
             clean_services
+            ;;
+        reset)
+            reset_services
             ;;
         build)
             rebuild_services

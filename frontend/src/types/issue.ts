@@ -22,6 +22,7 @@ export interface Issue {
   updated_at: Date | string;
   children?: Issue[];
   parent?: Issue;
+  wbs_number?: string; // WBS番号（1.1.1形式）
 }
 
 export interface CreateIssueDto {
@@ -50,13 +51,28 @@ export interface UpdateIssueDto {
   effort_hours?: number;
   is_blocked?: boolean;
   labels?: string[];
+  // version は Backend で自動処理されるため除外
 }
 
 export interface IssueFilters {
   status?: IssueStatus[];
   assignee?: string;
+  searchTerm?: string;
   sortBy?: 'created_at' | 'updated_at' | 'title' | 'start_date' | 'end_date';
   sortOrder?: 'asc' | 'desc';
+}
+
+// WBS関連の型定義
+export interface WBSTreeNode extends Issue {
+  level: number;
+  isExpanded: boolean;
+  hasChildren: boolean;
+  isVisible: boolean;
+}
+
+export interface WBSTreeState {
+  expandedNodes: Set<string>;
+  visibleNodes: Set<string>;
 }
 
 // Comment types

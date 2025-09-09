@@ -1,7 +1,29 @@
 FROM node:20-alpine
 
 # Check https://github.com/nodejs/docker-node/tree/b4117f9333da4138b03a546ec926ef50a31506c3#nodealpine to understand why libc6-compat might be needed.
-RUN apk add --no-cache libc6-compat
+# Cypress dependencies for E2E testing (Alpine Linux packages)
+# See: https://docs.cypress.io/guides/continuous-integration/introduction#Dependencies
+RUN apk add --no-cache \
+    libc6-compat \
+    xvfb \
+    gtk+3.0 \
+    gtk+3.0-dev \
+    libnotify \
+    nss \
+    alsa-lib \
+    xauth \
+    dbus \
+    font-noto-emoji \
+    eudev \
+    eudev-dev \
+    gcompat \
+    libstdc++ \
+    bash \
+    ca-certificates \
+    chromium \
+    chromium-chromedriver \
+    firefox \
+    wget
 
 WORKDIR /app
 
@@ -18,6 +40,12 @@ RUN \
 # Next.js collects completely anonymous telemetry data about general usage.
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=development
+
+# Cypress environment variables for Alpine Linux
+ENV CYPRESS_CACHE_FOLDER=/root/.cache/Cypress
+ENV DISPLAY=:0
+ENV CHROME_BIN=/usr/bin/chromium-browser
+ENV CHROME_PATH=/usr/bin/chromium-browser
 
 EXPOSE 3000
 
