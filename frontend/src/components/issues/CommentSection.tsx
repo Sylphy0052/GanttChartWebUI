@@ -1,9 +1,11 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Comment, CreateCommentDto, UpdateCommentDto } from '@/types/issue';
 import { ProjectRole } from '@/types/project';
 import { commentsApi, ApiError } from '@/lib/api';
+import MarkdownEditor from '@/components/common/MarkdownEditor';
+import MarkdownIt from 'markdown-it';
 
 interface CommentSectionProps {
   projectId: string;
@@ -29,18 +31,86 @@ const CommentSection: React.FC<CommentSectionProps> = ({
   const [editingComment, setEditingComment] = useState<EditingComment | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // markdown-itインスタンスを作成（カスタム設定付き）
+  const md = useMemo(() => {
+    const markdownIt = new MarkdownIt({
+      html: true,        // HTMLタグを有効化
+      linkify: true,     // URLを自動的にリンクに変換
+      typographer: true, // タイポグラフィー記号の変換を有効化
+      breaks: true,      // 改行を<br>に変換
+    });
+
+    // カスタムレンダリングルールを追加してTailwind CSSクラスを適用
+    markdownIt.renderer.rules.heading_open = (tokens, idx) => {
+      const token = tokens[idx];
+      const level = token.tag.slice(1);
+      const classes: Record<string, string> = {
+        '1': 'text-lg font-bold text-gray-900 mb-2',
+        '2': 'text-base font-semibold text-gray-900 mb-2',
+        '3': 'text-sm font-semibold text-gray-900 mb-1',
+        '4': 'text-sm font-medium text-gray-900 mb-1',
+        '5': 'text-xs font-medium text-gray-900 mb-1',
+        '6': 'text-xs font-medium text-gray-900 mb-1',
+      };
+      return `<${token.tag} class="${classes[level] || ''}">`;
+    };
+
+    markdownIt.renderer.rules.strong_open = () => '<strong class="font-semibold text-gray-900">';
+    markdownIt.renderer.rules.em_open = () => '<em class="italic text-gray-800">';
+    markdownIt.renderer.rules.code_inline = (tokens, idx) => {
+      const token = tokens[idx];
+      const code = markdownIt.utils.escapeHtml(token.content);
+      return `<code class="bg-gray-100 px-1 py-0.5 rounded text-xs font-mono text-gray-900">${code}</code>`;
+    };
+
+    markdownIt.renderer.rules.link_open = (tokens, idx) => {
+      const token = tokens[idx];
+      const hrefIndex = token.attrIndex('href');
+      const href = hrefIndex >= 0 ? token.attrs![hrefIndex][1] : '#';
+      return `<a href="${href}" class="text-blue-600 hover:text-blue-800 underline" target="_blank" rel="noopener noreferrer">`;
+    };
+
+    markdownIt.renderer.rules.bullet_list_open = () => '<ul class="ml-4 list-disc space-y-0 mb-2">';
+    markdownIt.renderer.rules.ordered_list_open = () => '<ol class="ml-4 list-decimal space-y-0 mb-2">';
+    markdownIt.renderer.rules.list_item_open = () => '<li class="text-gray-800">';
+
+    // コードブロックのレンダリング
+    markdownIt.renderer.rules.fence = (tokens, idx) => {
+      const token = tokens[idx];
+      const code = markdownIt.utils.escapeHtml(token.content);
+      const lang = token.info || '';
+      return `<pre class="bg-gray-100 rounded p-2 overflow-x-auto mb-2"><code class="text-xs font-mono text-gray-900"${lang ? ` data-lang="${lang}"` : ''}>${code}</code></pre>`;
+    };
+
+    // 段落のレンダリング
+    markdownIt.renderer.rules.paragraph_open = () => '<p class="text-gray-800 mb-2">';
+
+    // テーブルのレンダリング
+    markdownIt.renderer.rules.table_open = () => '<table class="min-w-full divide-y divide-gray-200 mb-4 border border-gray-200 rounded-lg overflow-hidden">';
+    markdownIt.renderer.rules.thead_open = () => '<thead class="bg-gray-50">';
+    markdownIt.renderer.rules.tbody_open = () => '<tbody class="bg-white divide-y divide-gray-200">';
+    markdownIt.renderer.rules.tr_open = () => '<tr>';
+    markdownIt.renderer.rules.th_open = () => '<th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider border-r border-gray-200 last:border-r-0">';
+    markdownIt.renderer.rules.td_open = () => '<td class="px-3 py-2 whitespace-nowrap text-sm text-gray-900 border-r border-gray-200 last:border-r-0">';
+
+    // 引用のレンダリング
+    markdownIt.renderer.rules.blockquote_open = () => '<blockquote class="border-l-4 border-gray-300 pl-4 py-1 mb-2 bg-gray-50">';
+
+    return markdownIt;
+  }, []);
+
   useEffect(() => {
     setComments(initialComments);
   }, [initialComments]);
 
   const renderMarkdown = (markdown: string): string => {
     if (!markdown) return '';
-    // 簡易的なMarkdown変換（実際のプロダクションではmarkdown-itなどを使用）
-    return markdown
-      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-      .replace(/\*(.*?)\*/g, '<em>$1</em>')
-      .replace(/`(.*?)`/g, '<code>$1</code>')
-      .replace(/\n/g, '<br/>');
+    try {
+      return md.render(markdown);
+    } catch (error) {
+      console.error('Markdown rendering error:', error);
+      return '<p class="text-red-600">Markdownのレンダリングに失敗しました</p>';
+    }
   };
 
   const formatDate = (date: Date | string): string => {
@@ -70,7 +140,7 @@ const CommentSection: React.FC<CommentSectionProps> = ({
       };
 
       const createdComment = await commentsApi.create(projectId, issueId, commentData);
-      setComments(prev => [...prev, createdComment]);
+      setComments(prev => [createdComment, ...prev]);
       setNewComment('');
     } catch (error) {
       console.error('Failed to create comment:', error);
@@ -175,17 +245,15 @@ const CommentSection: React.FC<CommentSectionProps> = ({
       {userRole === 'editor' && (
         <form onSubmit={handleSubmitComment} className="mb-8">
           <div className="mb-4">
-            <label htmlFor="new-comment" className="block text-sm font-medium text-gray-700 mb-2">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
               新しいコメント (Markdown)
             </label>
-            <textarea
-              id="new-comment"
-              rows={4}
+            <MarkdownEditor
               value={newComment}
-              onChange={(e) => setNewComment(e.target.value)}
-              className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+              onChange={setNewComment}
               placeholder="コメントをMarkdown形式で入力してください..."
               disabled={isSubmitting}
+              rows={4}
             />
           </div>
           <div className="flex justify-end">
@@ -310,10 +378,9 @@ const CommentSection: React.FC<CommentSectionProps> = ({
 
               {/* コメント本文 */}
               {editingComment?.id === comment.id ? (
-                <textarea
+                <MarkdownEditor
                   value={editingComment.body_md}
-                  onChange={(e) => setEditingComment({ ...editingComment, body_md: e.target.value })}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                  onChange={(value) => setEditingComment({ ...editingComment, body_md: value })}
                   rows={4}
                 />
               ) : (

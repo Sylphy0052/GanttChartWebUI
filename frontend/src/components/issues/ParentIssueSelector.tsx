@@ -1,283 +1,224 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { Issue } from '@/types/issue';
-import { issuesApi, ApiError } from '@/lib/api';
 
 interface ParentIssueSelectorProps {
-  projectId: string;
-  value?: string;
-  onChange: (parentId: string | undefined) => void;
-  excludeIssueId?: string; // 編集時に自分自身とその子Issuesを除外
+  currentIssue?: Issue | null;
+  allIssues: Issue[];
+  selectedParentId?: string | null;
+  onParentChange: (parentId: string | null) => void;
+  isLoading?: boolean;
   disabled?: boolean;
 }
 
-const ParentIssueSelector: React.FC<ParentIssueSelectorProps> = ({
-  projectId,
-  value,
-  onChange,
-  excludeIssueId,
+/**
+ * 親Issue選択UIコンポーネント
+ * ドロップダウンで親Issueを選択可能、循環参照防止機能付き
+ */
+const ParentIssueSelector: React.FC<ParentIssueSelectorProps> = React.memo(({
+  currentIssue,
+  allIssues,
+  selectedParentId,
+  onParentChange,
+  isLoading = false,
   disabled = false,
 }) => {
-  const [issues, setIssues] = useState<Issue[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+
   const [isOpen, setIsOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
+  const dropdownRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
 
-  useEffect(() => {
-    const loadIssues = async () => {
-      try {
-        setIsLoading(true);
-        setError(null);
-        const data = await issuesApi.getAll(projectId);
-        
-        // 階層構造を構築
-        const issueMap = new Map<string, Issue>(data.map(issue => [issue.id, { ...issue, children: [] as Issue[] }]));
-        const rootIssues: Issue[] = [];
-        
-        data.forEach(issue => {
-          const issueWithChildren = issueMap.get(issue.id)!;
-          
-          if (issue.parent_id) {
-            const parent = issueMap.get(issue.parent_id);
-            if (parent) {
-              if (!parent.children) {
-                parent.children = [];
-              }
-              parent.children.push(issueWithChildren);
-            } else {
-              // 親が見つからない場合は、ルートレベルに追加
-              rootIssues.push(issueWithChildren);
-            }
-          } else {
-            rootIssues.push(issueWithChildren);
-          }
-        });
-        
-        setIssues(rootIssues);
-      } catch (error) {
-        if (error instanceof ApiError) {
-          setError(`Issueの読み込みに失敗しました: ${error.message}`);
-        } else {
-          setError('ネットワークエラーが発生しました');
-        }
-        console.error('Failed to load issues:', error);
-      } finally {
-        setIsLoading(false);
-      }
-    };
+  // 現在の親Issue
+  const currentParent = useMemo(() => {
+    const parentId = selectedParentId !== undefined ? selectedParentId : currentIssue?.parent_id;
+    return parentId ? allIssues.find(issue => issue.id === parentId) : null;
+  }, [selectedParentId, currentIssue?.parent_id, allIssues]);
 
-    if (projectId) {
-      loadIssues();
+  // 選択可能な親Issue候補（循環参照を防ぐため子孫は除外）
+  const availableParents = useMemo(() => {
+    // 新規作成時（currentIssueがない場合）は全てのIssueが選択可能
+    if (!currentIssue) {
+      return allIssues;
     }
-  }, [projectId]);
 
-  // 除外すべきIssue IDのセットを作成（自分自身とその子Issues）
-  const excludedIds = useMemo(() => {
-    if (!excludeIssueId) return new Set();
-    
-    const excluded = new Set<string>([excludeIssueId]);
-    
-    const addChildrenToExcluded = (issues: Issue[]) => {
-      issues.forEach(issue => {
-        if (issue.parent_id === excludeIssueId || excluded.has(issue.parent_id || '')) {
-          excluded.add(issue.id);
-          if (issue.children) {
-            addChildrenToExcluded(issue.children);
-          }
-        }
-      });
-    };
-    
-    // 全てのIssueをフラットにして子Issueを探す
-    const flattenIssues = (issues: Issue[]): Issue[] => {
-      return issues.reduce((acc, issue) => {
-        acc.push(issue);
-        if (issue.children) {
-          acc.push(...flattenIssues(issue.children));
-        }
-        return acc;
-      }, [] as Issue[]);
-    };
-    
-    const allIssues = flattenIssues(issues);
-    addChildrenToExcluded(allIssues);
-    
-    return excluded;
-  }, [excludeIssueId, issues]);
-
-  // フィルタリングされたIssueリストを作成
-  const filteredIssues = useMemo(() => {
-    const filterIssues = (issues: Issue[], depth = 0): Array<Issue & { depth: number }> => {
-      const result: Array<Issue & { depth: number }> = [];
+    // 子孫Issueを再帰的に取得
+    const getDescendants = (issueId: string): Set<string> => {
+      const descendants = new Set<string>([issueId]);
       
-      issues.forEach(issue => {
-        // 除外対象でない場合のみ追加
-        if (!excludedIds.has(issue.id)) {
-          // 検索クエリでフィルタリング
-          const matchesSearch = !searchQuery || 
-            issue.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            issue.assignee?.toLowerCase().includes(searchQuery.toLowerCase());
-          
-          if (matchesSearch) {
-            result.push({ ...issue, depth });
-          }
-          
-          // 子Issuesも処理（親がフィルタされていても子は表示する可能性がある）
-          if (issue.children) {
-            result.push(...filterIssues(issue.children, depth + 1));
-          }
-        }
+      const children = allIssues.filter(issue => issue.parent_id === issueId);
+      children.forEach(child => {
+        const childDescendants = getDescendants(child.id);
+        childDescendants.forEach(desc => descendants.add(desc));
       });
       
-      return result;
+      return descendants;
     };
-    
-    return filterIssues(issues);
-  }, [issues, excludedIds, searchQuery]);
 
-  const selectedIssue = useMemo(() => {
-    const findIssue = (issues: Issue[]): Issue | null => {
-      for (const issue of issues) {
-        if (issue.id === value) return issue;
-        if (issue.children) {
-          const found = findIssue(issue.children);
-          if (found) return found;
-        }
+    const descendants = getDescendants(currentIssue.id);
+    
+    return allIssues.filter(issue => 
+      !descendants.has(issue.id) && // 自分と子孫は除外
+      issue.id !== currentIssue.id // 自分自身も除外
+    );
+  }, [currentIssue?.id, allIssues]);
+
+  // 検索フィルター
+  const filteredParents = useMemo(() => {
+    if (!availableParents) return [];
+    if (!searchTerm) return availableParents;
+    
+    return availableParents.filter(issue =>
+      issue.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (issue.wbs_number && issue.wbs_number.includes(searchTerm))
+    );
+  }, [availableParents, searchTerm]);
+
+  // 外部クリック検知
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setIsOpen(false);
+        setSearchTerm('');
       }
-      return null;
     };
-    return value ? findIssue(issues) : null;
-  }, [value, issues]);
 
-  const handleSelect = (issue: Issue | null) => {
-    onChange(issue?.id);
-    setIsOpen(false);
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // ドロップダウンを開く
+  const handleOpen = () => {
+    if (!disabled && !isLoading) {
+      setIsOpen(true);
+      setTimeout(() => inputRef.current?.focus(), 0);
+    }
   };
 
-  if (error) {
-    return (
-      <div className="text-sm text-red-600">
-        {error}
-      </div>
-    );
-  }
+  // 親Issueを選択
+  const handleSelectParent = (parentId: string | null) => {
+    onParentChange(parentId);
+    setIsOpen(false);
+    setSearchTerm('');
+  };
+
+  // Issue表示名を生成
+  const getIssueDisplayName = (issue: Issue) => {
+    const wbsPrefix = issue.wbs_number ? `${issue.wbs_number} ` : '';
+    return `${wbsPrefix}${issue.title}`;
+  };
 
   return (
-    <div className="relative">
-      <label className="block text-sm font-medium text-gray-700 mb-2">
+    <div className="relative" ref={dropdownRef}>
+      <label className="block text-sm font-medium text-gray-700 mb-1">
         親Issue
       </label>
       
-      {/* セレクターボタン */}
+      {/* 選択ボックス */}
       <button
         type="button"
-        onClick={() => !disabled && setIsOpen(!isOpen)}
-        disabled={disabled}
-        className={`relative w-full bg-white border rounded-md shadow-sm pl-3 pr-10 py-2 text-left cursor-default focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500 sm:text-sm ${
-          disabled ? 'bg-gray-50 text-gray-500' : 'border-gray-300'
-        }`}
+        onClick={handleOpen}
+        disabled={disabled || isLoading}
+        className={`
+          relative w-full bg-white border border-gray-300 rounded-md shadow-sm py-2 px-3 text-left
+          cursor-default focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500
+          ${disabled || isLoading ? 'bg-gray-100 cursor-not-allowed' : 'hover:bg-gray-50'}
+        `}
       >
-        <span className="block truncate">
+        <div className="flex items-center justify-between">
+          <span className={currentParent ? 'text-gray-900' : 'text-gray-500'}>
+            {currentParent ? getIssueDisplayName(currentParent) : '親Issueを選択'}
+          </span>
           {isLoading ? (
-            '読み込み中...'
-          ) : selectedIssue ? (
-            `${selectedIssue.title} (${selectedIssue.assignee || '未割り当て'})`
+            <svg className="animate-spin h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="m4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+            </svg>
           ) : (
-            '親Issueを選択'
+            <svg className="h-4 w-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+            </svg>
           )}
-        </span>
-        <span className="absolute inset-y-0 right-0 flex items-center pr-2 pointer-events-none">
-          <svg
-            className="h-5 w-5 text-gray-400"
-            xmlns="http://www.w3.org/2000/svg"
-            viewBox="0 0 20 20"
-            fill="currentColor"
-          >
-            <path
-              fillRule="evenodd"
-              d="M10 3a1 1 0 01.707.293l3 3a1 1 0 01-1.414 1.414L10 5.414 7.707 7.707a1 1 0 01-1.414-1.414l3-3A1 1 0 0110 3zm-3.707 9.293a1 1 0 011.414 0L10 14.586l2.293-2.293a1 1 0 011.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z"
-              clipRule="evenodd"
-            />
-          </svg>
-        </span>
+        </div>
       </button>
 
       {/* ドロップダウンメニュー */}
       {isOpen && (
-        <div className="absolute z-10 mt-1 w-full bg-white shadow-lg max-h-60 rounded-md py-1 text-base ring-1 ring-black ring-opacity-5 overflow-auto focus:outline-none sm:text-sm">
-          {/* 検索フィールド */}
-          <div className="sticky top-0 z-10 bg-white px-3 py-2 border-b border-gray-200">
+        <div className="absolute z-10 mt-1 w-full bg-white shadow-lg max-h-60 rounded-md py-1 text-base ring-1 ring-black ring-opacity-5 overflow-auto focus:outline-none">
+          {/* 検索入力 */}
+          <div className="px-3 py-2 border-b border-gray-200">
             <input
+              ref={inputRef}
               type="text"
               placeholder="Issueを検索..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full px-2 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 focus:border-blue-500"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="w-full px-2 py-1 text-sm border border-gray-300 rounded text-gray-900 bg-white placeholder-gray-400 focus:outline-none focus:ring-1 focus:ring-blue-500"
             />
           </div>
 
-          {/* なしオプション */}
+          {/* 親なし選択 */}
           <button
             type="button"
-            onClick={() => handleSelect(null)}
-            className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-50 focus:bg-gray-50 focus:outline-none ${
-              !value ? 'bg-blue-50 text-blue-700' : 'text-gray-900'
-            }`}
+            onClick={() => handleSelectParent(null)}
+            className={`
+              w-full text-left px-3 py-2 text-sm hover:bg-gray-100 flex items-center
+              ${!currentParent ? 'bg-blue-50 text-blue-600' : 'text-gray-700'}
+            `}
           >
-            なし（親Issueなし）
+            <svg className="h-4 w-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+            親Issueなし（ルートレベル）
           </button>
 
-          {/* Issue一覧 */}
-          {filteredIssues.length === 0 ? (
-            <div className="px-3 py-2 text-sm text-gray-500">
-              {searchQuery ? '検索結果がありません' : 'Issueがありません'}
-            </div>
-          ) : (
-            filteredIssues.map((issue) => (
+          {/* Issue候補リスト */}
+          {filteredParents.length > 0 ? (
+            filteredParents.map((issue) => (
               <button
                 key={issue.id}
                 type="button"
-                onClick={() => handleSelect(issue)}
-                className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-50 focus:bg-gray-50 focus:outline-none ${
-                  value === issue.id ? 'bg-blue-50 text-blue-700' : 'text-gray-900'
-                }`}
+                onClick={() => handleSelectParent(issue.id)}
+                className={`
+                  w-full text-left px-3 py-2 text-sm hover:bg-gray-100 flex items-center
+                  ${currentParent?.id === issue.id ? 'bg-blue-50 text-blue-600' : 'text-gray-700'}
+                `}
               >
-                <div className="flex items-center">
-                  {/* インデント表示 */}
-                  <div style={{ paddingLeft: `${issue.depth * 16}px` }}>
-                    {issue.depth > 0 && (
-                      <span className="text-gray-400 mr-1">└</span>
-                    )}
-                  </div>
-                  
-                  <div className="flex-1 min-w-0">
-                    <div className="truncate font-medium">
-                      {issue.title}
-                    </div>
-                    <div className="text-xs text-gray-500 truncate">
-                      {issue.assignee || '未割り当て'} • {issue.status === 'open' ? 'オープン' : 
-                       issue.status === 'in_progress' ? '進行中' :
-                       issue.status === 'done' ? '完了' : 'ブロック'}
-                    </div>
-                  </div>
-                </div>
+                {/* ステータスバッジ */}
+                <span className={`
+                  inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium mr-2
+                  ${issue.status === 'open' ? 'bg-blue-100 text-blue-800' : ''}
+                  ${issue.status === 'in_progress' ? 'bg-yellow-100 text-yellow-800' : ''}
+                  ${issue.status === 'done' ? 'bg-green-100 text-green-800' : ''}
+                  ${issue.status === 'blocked' ? 'bg-red-100 text-red-800' : ''}
+                `}>
+                  {issue.status === 'open' && 'オープン'}
+                  {issue.status === 'in_progress' && '進行中'}
+                  {issue.status === 'done' && '完了'}
+                  {issue.status === 'blocked' && 'ブロック'}
+                </span>
+                
+                <span className="truncate">
+                  {getIssueDisplayName(issue)}
+                </span>
               </button>
             ))
+          ) : searchTerm ? (
+            <div className="px-3 py-2 text-sm text-gray-500">
+              検索結果がありません
+            </div>
+          ) : (
+            <div className="px-3 py-2 text-sm text-gray-500">
+              選択可能な親Issueがありません
+            </div>
           )}
         </div>
       )}
-
-      {/* オーバーレイ */}
-      {isOpen && (
-        <div
-          className="fixed inset-0 z-0"
-          onClick={() => setIsOpen(false)}
-        />
-      )}
     </div>
   );
-};
+});
+
+ParentIssueSelector.displayName = 'ParentIssueSelector';
 
 export default ParentIssueSelector;

@@ -19,6 +19,11 @@ export default function NotificationDisplay() {
         return 'border-purple-500 bg-purple-50';
       case 'comment_deleted':
         return 'border-orange-500 bg-orange-50';
+      // WBS関連通知の色設定
+      case 'issues_reordered':
+        return 'border-indigo-500 bg-indigo-50';
+      case 'issue_hierarchy_changed':
+        return 'border-teal-500 bg-teal-50';
       default:
         return 'border-gray-500 bg-gray-50';
     }
@@ -38,6 +43,11 @@ export default function NotificationDisplay() {
         return '📝';
       case 'comment_deleted':
         return '❌';
+      // WBS関連通知のアイコン
+      case 'issues_reordered':
+        return '🔄';
+      case 'issue_hierarchy_changed':
+        return '🌳';
       default:
         return '📢';
     }
@@ -72,6 +82,17 @@ export default function NotificationDisplay() {
               {latestNotification.data.projectId && (
                 <div className="text-xs text-blue-600 mt-1">
                   プロジェクト: {latestNotification.data.projectId}
+                </div>
+              )}
+              {/* WBS関連の詳細情報表示 */}
+              {latestNotification.data.wbsChangeType && (
+                <div className="text-xs text-indigo-600 mt-1">
+                  変更タイプ: {latestNotification.data.wbsChangeType === 'reorder' ? '並び替え' : '階層変更'}
+                </div>
+              )}
+              {latestNotification.data.affectedIssues && (
+                <div className="text-xs text-teal-600 mt-1">
+                  影響: {latestNotification.data.affectedIssues.length}件のIssue
                 </div>
               )}
             </div>
@@ -114,6 +135,13 @@ export default function NotificationDisplay() {
                   {notification.data.entityType && notification.data.entityId && (
                     <div className="text-xs text-gray-600 mt-1">
                       {notification.data.entityType}: {notification.data.entityId}
+                    </div>
+                  )}
+                  {/* WBS関連の詳細情報 */}
+                  {notification.data.wbsChangeType && (
+                    <div className="text-xs text-indigo-600 mt-1">
+                      {notification.data.wbsChangeType === 'reorder' ? '並び替え' : '階層変更'}
+                      {notification.data.affectedIssues && ` (${notification.data.affectedIssues.length}件)`}
                     </div>
                   )}
                 </div>

@@ -4,7 +4,8 @@ import React, { useState, useEffect } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { Issue, UpdateIssueDto } from '@/types/issue';
 import { ProjectRole } from '@/types/project';
-import { issuesApi, ApiError } from '@/lib/api';
+import { issuesApi } from '@/api/issues';
+import { ApiError } from '@/lib/api';
 import IssueForm from '@/components/issues/IssueForm';
 
 export default function EditIssuePage() {
@@ -90,7 +91,30 @@ export default function EditIssuePage() {
       setIsSubmitting(true);
       setError(null);
       
-      const updatedIssue = await issuesApi.update(projectId, issueId, data);
+      console.log('Edit submission data:', data);
+      console.log('Current issue version:', issue?.version);
+      
+      // 親Issueが変更されている場合は、階層変更APIを呼び出す
+      if (issue && data.parent_id !== issue.parent_id) {
+        await issuesApi.changeHierarchy(issueId, {
+          new_parent_id: data.parent_id || null,
+          version: issue.version, // 現在のissueのversionを使用
+        });
+        
+        // parent_idとversionは別APIで処理するため、updateデータから除外
+        const { parent_id, version, ...updateData } = data;
+        // 他に更新するフィールドがある場合のみupdate APIを呼び出す
+        if (Object.keys(updateData).length > 0) {
+          console.log('Update data after hierarchy change:', updateData);
+          const updatedIssue = await issuesApi.update(projectId, issueId, updateData);
+        }
+      } else {
+        // parent_idの変更がない場合は通常の更新
+        // parent_idとversionを除外（versionはBackendで自動処理される）
+        const { parent_id, version, ...updateData } = data;
+        console.log('Update data:', updateData);
+        const updatedIssue = await issuesApi.update(projectId, issueId, updateData);
+      }
       
       // 成功時はIssue一覧ページにリダイレクト
       router.push(`/projects/${projectId}/issues`);

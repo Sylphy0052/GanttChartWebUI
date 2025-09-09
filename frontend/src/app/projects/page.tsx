@@ -15,8 +15,8 @@ export default function ProjectsPage() {
   const handleProjectAccess = (project: Project, role: ProjectRole) => {
     // プロジェクトアクセス成功時の処理
     setSelectedProject({ project, role });
-    // 実際のアプリでは、プロジェクト詳細ページやダッシュボードにリダイレクトする
-    router.push(`/projects/${project.id}/dashboard`);
+    // プロジェクトのIssue管理ページにリダイレクト
+    router.push(`/projects/${project.id}/issues`);
   };
 
   const handleProjectCreate = () => {

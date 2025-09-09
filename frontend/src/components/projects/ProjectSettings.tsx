@@ -188,7 +188,7 @@ const ProjectSettings: React.FC<ProjectSettingsProps> = ({ projectId }) => {
 
   if (isLoading) {
     return (
-      <div className="flex justify-center items-center h-64">
+      <div className="min-h-screen bg-gray-50 flex justify-center items-center">
         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
       </div>
     );
@@ -196,39 +196,62 @@ const ProjectSettings: React.FC<ProjectSettingsProps> = ({ projectId }) => {
 
   if (!project) {
     return (
-      <div className="text-center py-12">
-        <div className="text-gray-500">プロジェクトが見つかりません</div>
-        <button
-          onClick={() => router.push('/projects')}
-          className="mt-4 text-blue-600 hover:text-blue-800 underline"
-        >
-          プロジェクト一覧に戻る
-        </button>
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="text-gray-500">プロジェクトが見つかりません</div>
+          <button
+            onClick={() => router.push('/projects')}
+            className="mt-4 text-blue-600 hover:text-blue-800 underline"
+          >
+            プロジェクト一覧に戻る
+          </button>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="max-w-4xl mx-auto px-4 py-6">
+    <div className="min-h-screen bg-gray-50">
+      <div className="max-w-4xl mx-auto px-4 py-6">
+      {/* ブレッドクラム */}
+      <nav className="mb-6" aria-label="Breadcrumb">
+        <ol className="flex items-center space-x-2 text-sm">
+          <li>
+            <button
+              onClick={() => router.push('/projects')}
+              className="text-gray-500 hover:text-gray-700 hover:underline"
+            >
+              プロジェクト一覧
+            </button>
+          </li>
+          <li>
+            <svg className="w-4 h-4 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
+            </svg>
+          </li>
+          <li>
+            <button
+              onClick={() => router.push(`/projects/${projectId}/issues`)}
+              className="text-gray-500 hover:text-gray-700 hover:underline"
+            >
+              {project.name}
+            </button>
+          </li>
+          <li>
+            <svg className="w-4 h-4 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
+              <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
+            </svg>
+          </li>
+          <li>
+            <span className="text-gray-900 font-medium">設定</span>
+          </li>
+        </ol>
+      </nav>
+
       {/* ヘッダー */}
       <div className="mb-8">
-        <div className="flex items-center space-x-4 mb-4">
-          <button
-            onClick={() => router.back()}
-            className="text-gray-400 hover:text-gray-600 transition-colors"
-            title="戻る"
-          >
-            <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 20 20">
-              <path
-                fillRule="evenodd"
-                d="M9.707 16.707a1 1 0 01-1.414 0l-6-6a1 1 0 010-1.414l6-6a1 1 0 011.414 1.414L5.414 9H17a1 1 0 110 2H5.414l4.293 4.293a1 1 0 010 1.414z"
-                clipRule="evenodd"
-              />
-            </svg>
-          </button>
-          <h1 className="text-2xl font-bold text-gray-900">プロジェクト設定</h1>
-        </div>
-        <p className="text-gray-600">{project.name}</p>
+        <h1 className="text-2xl font-bold text-gray-900">プロジェクト設定</h1>
+        <p className="text-gray-600 mt-2">{project.name}</p>
       </div>
 
       {/* メッセージ表示 */}
@@ -262,7 +285,7 @@ const ProjectSettings: React.FC<ProjectSettingsProps> = ({ projectId }) => {
                   name="name"
                   value={formData.name}
                   onChange={handleInputChange}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   placeholder="プロジェクト名を入力"
                   required
                 />
@@ -277,7 +300,7 @@ const ProjectSettings: React.FC<ProjectSettingsProps> = ({ projectId }) => {
                   value={formData.description}
                   onChange={handleInputChange}
                   rows={3}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   placeholder="プロジェクトの説明（任意）"
                 />
               </div>
@@ -335,7 +358,7 @@ const ProjectSettings: React.FC<ProjectSettingsProps> = ({ projectId }) => {
                       name="newPassword"
                       value={formData.newPassword}
                       onChange={handleInputChange}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       placeholder="4文字以上で入力"
                       minLength={4}
                     />
@@ -350,7 +373,7 @@ const ProjectSettings: React.FC<ProjectSettingsProps> = ({ projectId }) => {
                       name="confirmPassword"
                       value={formData.confirmPassword}
                       onChange={handleInputChange}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md text-gray-900 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                       placeholder="パスワードを再入力"
                     />
                   </div>
@@ -430,6 +453,7 @@ const ProjectSettings: React.FC<ProjectSettingsProps> = ({ projectId }) => {
             </p>
           </div>
         </div>
+      </div>
       </div>
     </div>
   );

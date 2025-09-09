@@ -76,7 +76,7 @@ const HolidayDatePicker: React.FC<HolidayDatePickerProps> = ({
             onChange={(e) => setNewDate(e.target.value)}
             onKeyPress={handleKeyPress}
             disabled={disabled}
-            className="block w-full rounded-md border-gray-300 shadow-sm focus:border-blue-500 focus:ring-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed sm:text-sm"
+            className="block w-full rounded-md border-gray-300 shadow-sm text-gray-900 bg-white focus:border-blue-500 focus:ring-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed sm:text-sm"
             placeholder="YYYY-MM-DD"
           />
         </div>

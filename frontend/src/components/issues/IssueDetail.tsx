@@ -1,22 +1,27 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { IssueDetailData, IssueStatus } from '@/types/issue';
+import React, { useState, useEffect, useMemo } from 'react';
+import { IssueDetailData, IssueStatus, Issue } from '@/types/issue';
 import { ProjectRole } from '@/types/project';
 import { UploadedFile } from '@/types/upload';
 import { uploadsApi } from '@/lib/api';
+import { useHierarchyChange } from '@/hooks/useHierarchyChange';
 import CommentSection from './CommentSection';
 import ChangeLogSection from './ChangeLogSection';
 import ImageUpload from '../uploads/ImageUpload';
 import ImageGallery from '../uploads/ImageGallery';
+import ParentIssueSelector from './ParentIssueSelector';
+import MarkdownIt from 'markdown-it';
 
 interface IssueDetailProps {
   issue: IssueDetailData;
   projectId: string;
   userRole: ProjectRole;
+  allIssues?: Issue[]; // 階層変更機能のために追加
   onEdit: () => void;
   onDelete: () => void;
   onBack: () => void;
+  onIssueUpdate?: (updatedIssue: Issue) => void; // Issue更新時のコールバック
   error?: string | null;
   onErrorClear: () => void;
 }
@@ -32,15 +37,26 @@ const IssueDetail: React.FC<IssueDetailProps> = ({
   issue,
   projectId,
   userRole,
+  allIssues = [],
   onEdit,
   onDelete,
   onBack,
+  onIssueUpdate,
   error,
   onErrorClear,
 }) => {
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>(issue.uploadedFiles || []);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [isLoadingFiles, setIsLoadingFiles] = useState(false);
+  const [showHierarchySelector, setShowHierarchySelector] = useState(false);
+
+  // 階層変更フック
+  const {
+    state: hierarchyState,
+    changeHierarchy,
+    validateHierarchyChange,
+    clearError: clearHierarchyError,
+  } = useHierarchyChange();
 
   const statusInfo = statusOptions.find(s => s.value === issue.status) || statusOptions[0];
 
@@ -61,6 +77,45 @@ const IssueDetail: React.FC<IssueDetailProps> = ({
     fetchUploadedFiles();
   }, [projectId, issue.id]);
 
+  // 階層変更処理
+  const handleHierarchyChange = async (newParentId: string | null) => {
+    if (!allIssues.length) {
+      console.warn('階層変更にはallIssuesが必要です');
+      return;
+    }
+
+    // バリデーション
+    const validation = validateHierarchyChange(issue, newParentId, allIssues);
+    if (!validation.isValid) {
+      setUploadError(validation.error || '階層変更ができません');
+      return;
+    }
+
+    try {
+      await changeHierarchy(
+        issue.id,
+        newParentId,
+        issue.version,
+        (updatedIssue, affectedIssues) => {
+          // 親コンポーネントにIssue更新を通知
+          if (onIssueUpdate) {
+            onIssueUpdate(updatedIssue);
+          }
+          
+          setShowHierarchySelector(false);
+          
+          // 成功メッセージ（簡易実装）
+          setTimeout(() => {
+            alert('階層を変更しました。WBS番号が更新されています。');
+          }, 100);
+        }
+      );
+    } catch (error) {
+      // エラーは useHierarchyChange で処理済み
+      console.error('階層変更エラー:', error);
+    }
+  };
+
   const formatDate = (date: Date | string | undefined): string => {
     if (!date) return '-';
     const dateObj = typeof date === 'string' ? new Date(date) : date;
@@ -71,14 +126,82 @@ const IssueDetail: React.FC<IssueDetailProps> = ({
     });
   };
 
+  // markdown-itインスタンスを作成（MarkdownEditorと同じ設定）
+  const md = useMemo(() => {
+    const mdInstance = new MarkdownIt({
+      html: true,        // HTMLタグを有効化
+      linkify: true,     // URLを自動的にリンクに変換
+      typographer: true, // タイポグラフィー記号の変換を有効化
+      breaks: true,      // 改行を<br>に変換
+    });
+
+    // カスタムレンダリングルールを追加してTailwind CSSクラスを適用
+    mdInstance.renderer.rules.heading_open = (tokens, idx) => {
+      const token = tokens[idx];
+      const level = token.tag.slice(1); // h1 -> 1, h2 -> 2, etc.
+      const classes: Record<string, string> = {
+        '1': 'text-2xl font-bold text-gray-900 mb-4',
+        '2': 'text-xl font-semibold text-gray-900 mb-3',
+        '3': 'text-lg font-semibold text-gray-900 mb-2',
+        '4': 'text-base font-semibold text-gray-900 mb-1',
+        '5': 'text-sm font-semibold text-gray-900 mb-1',
+        '6': 'text-xs font-semibold text-gray-900 mb-1',
+      };
+      return `<${token.tag} class="${classes[level] || ''}">`;
+    };
+
+    mdInstance.renderer.rules.strong_open = () => '<strong class="font-semibold text-gray-900">';
+    mdInstance.renderer.rules.em_open = () => '<em class="italic text-gray-800">';
+    mdInstance.renderer.rules.code_inline = (tokens, idx) => {
+      const token = tokens[idx];
+      const code = mdInstance.utils.escapeHtml(token.content);
+      return `<code class="bg-gray-100 px-1 py-0.5 rounded text-sm font-mono text-gray-900">${code}</code>`;
+    };
+
+    mdInstance.renderer.rules.link_open = (tokens, idx) => {
+      const token = tokens[idx];
+      const hrefIndex = token.attrIndex('href');
+      const href = hrefIndex >= 0 ? token.attrs![hrefIndex][1] : '#';
+      return `<a href="${href}" class="text-blue-600 hover:text-blue-800 underline" target="_blank" rel="noopener noreferrer">`;
+    };
+
+    mdInstance.renderer.rules.bullet_list_open = () => '<ul class="ml-4 list-disc space-y-0 mb-2">';
+    mdInstance.renderer.rules.ordered_list_open = () => '<ol class="ml-4 list-decimal space-y-0 mb-2">';
+    mdInstance.renderer.rules.list_item_open = () => '<li class="text-gray-800">';
+
+    // コードブロックのレンダリング
+    mdInstance.renderer.rules.fence = (tokens, idx) => {
+      const token = tokens[idx];
+      const code = mdInstance.utils.escapeHtml(token.content);
+      const lang = token.info || '';
+      return `<pre class="bg-gray-100 rounded p-3 overflow-x-auto mb-4"><code class="text-sm font-mono text-gray-900"${lang ? ` data-lang="${lang}"` : ''}>${code}</code></pre>`;
+    };
+
+    // 段落のレンダリング
+    mdInstance.renderer.rules.paragraph_open = () => '<p class="text-gray-800 mb-2">';
+
+    // テーブルのレンダリング
+    mdInstance.renderer.rules.table_open = () => '<table class="min-w-full divide-y divide-gray-200 mb-4">';
+    mdInstance.renderer.rules.thead_open = () => '<thead class="bg-gray-50">';
+    mdInstance.renderer.rules.tbody_open = () => '<tbody class="bg-white divide-y divide-gray-200">';
+    mdInstance.renderer.rules.tr_open = () => '<tr>';
+    mdInstance.renderer.rules.th_open = () => '<th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">';
+    mdInstance.renderer.rules.td_open = () => '<td class="px-3 py-2 whitespace-nowrap text-sm text-gray-900">';
+
+    // 引用のレンダリング
+    mdInstance.renderer.rules.blockquote_open = () => '<blockquote class="border-l-4 border-gray-300 pl-4 py-1 mb-4">';
+
+    return mdInstance;
+  }, []);
+
   const renderMarkdown = (markdown: string | undefined): string => {
     if (!markdown) return '';
-    // 簡易的なMarkdown変換（実際のプロダクションではmarkdown-itなどを使用）
-    return markdown
-      .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-      .replace(/\*(.*?)\*/g, '<em>$1</em>')
-      .replace(/`(.*?)`/g, '<code>$1</code>')
-      .replace(/\n/g, '<br/>');
+    try {
+      return md.render(markdown);
+    } catch (error) {
+      console.error('Markdown rendering error:', error);
+      return '<p class="text-red-600">Markdownのレンダリングに失敗しました</p>';
+    }
   };
 
   // Handle successful upload
@@ -100,13 +223,14 @@ const IssueDetail: React.FC<IssueDetailProps> = ({
   // Clear upload error
   const clearUploadError = () => {
     setUploadError(null);
+    clearHierarchyError();
   };
 
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="max-w-5xl mx-auto py-8 px-4 sm:px-6 lg:px-8">
         {/* エラー表示 */}
-        {error && (
+        {(error || hierarchyState.error) && (
           <div className="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
             <div className="flex items-center justify-between">
               <div className="flex items-center">
@@ -123,10 +247,13 @@ const IssueDetail: React.FC<IssueDetailProps> = ({
                     d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.664-.833-2.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z"
                   />
                 </svg>
-                <p className="text-red-700">{error}</p>
+                <p className="text-red-700">{error || hierarchyState.error}</p>
               </div>
               <button
-                onClick={onErrorClear}
+                onClick={() => {
+                  onErrorClear();
+                  clearHierarchyError();
+                }}
                 className="text-red-400 hover:text-red-600"
               >
                 <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
@@ -184,6 +311,9 @@ const IssueDetail: React.FC<IssueDetailProps> = ({
                 </button>
                 <div>
                   <h1 className="text-2xl font-bold text-gray-900">
+                    {issue.wbs_number && (
+                      <span className="text-blue-600 mr-2">{issue.wbs_number}</span>
+                    )}
                     {issue.title}
                   </h1>
                   <p className="text-sm text-gray-500">Issue ID: {issue.id}</p>
@@ -248,6 +378,36 @@ const IssueDetail: React.FC<IssueDetailProps> = ({
                 </div>
               </div>
 
+              {/* 親Issue */}
+              {issue.parent && (
+                <div className="mb-6">
+                  <h3 className="text-sm font-medium text-gray-700 mb-3">親タスク</h3>
+                  <div className="flex items-center justify-between p-3 bg-blue-50 rounded-md hover:bg-blue-100 transition-colors">
+                    <div className="flex items-center space-x-3">
+                      <span
+                        className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                          statusOptions.find(s => s.value === issue.parent.status)?.color || 'bg-gray-100 text-gray-800'
+                        }`}
+                      >
+                        {statusOptions.find(s => s.value === issue.parent.status)?.label || issue.parent.status}
+                      </span>
+                      <span className="text-sm text-gray-900">
+                        {issue.parent.wbs_number && (
+                          <span className="text-blue-600 mr-2">{issue.parent.wbs_number}</span>
+                        )}
+                        {issue.parent.title}
+                      </span>
+                    </div>
+                    <a
+                      href={`/projects/${projectId}/issues/${issue.parent.id}`}
+                      className="text-blue-600 hover:text-blue-800 text-sm font-medium"
+                    >
+                      詳細を見る →
+                    </a>
+                  </div>
+                </div>
+              )}
+
               {/* 子Issue一覧 */}
               {issue.children && issue.children.length > 0 && (
                 <div className="mb-6">
@@ -266,14 +426,19 @@ const IssueDetail: React.FC<IssueDetailProps> = ({
                           >
                             {statusOptions.find(s => s.value === child.status)?.label || child.status}
                           </span>
-                          <span className="text-sm text-gray-900">{child.title}</span>
+                          <span className="text-sm text-gray-900">
+                            {child.wbs_number && (
+                              <span className="text-blue-600 mr-2">{child.wbs_number}</span>
+                            )}
+                            {child.title}
+                          </span>
                         </div>
-                        <button
-                          onClick={() => window.open(`/projects/${projectId}/issues/${child.id}`, '_blank')}
-                          className="text-blue-600 hover:text-blue-800 text-sm"
+                        <a
+                          href={`/projects/${projectId}/issues/${child.id}`}
+                          className="text-blue-600 hover:text-blue-800 text-sm font-medium"
                         >
-                          詳細
-                        </button>
+                          詳細を見る →
+                        </a>
                       </div>
                     ))}
                   </div>
@@ -374,20 +539,56 @@ const IssueDetail: React.FC<IssueDetailProps> = ({
                   </div>
                 )}
 
-                {/* 親Issue */}
-                {issue.parent && (
-                  <div>
-                    <dt className="text-sm font-medium text-gray-500">親Issue</dt>
-                    <dd className="mt-1">
+                {/* 階層変更UI */}
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <dt className="text-sm font-medium text-gray-500">階層構造</dt>
+                    {userRole === 'editor' && allIssues.length > 0 && (
                       <button
-                        onClick={() => window.open(`/projects/${projectId}/issues/${issue.parent!.id}`, '_blank')}
-                        className="text-sm text-blue-600 hover:text-blue-800"
+                        onClick={() => setShowHierarchySelector(!showHierarchySelector)}
+                        disabled={hierarchyState.isLoading}
+                        className="text-sm text-blue-600 hover:text-blue-800 disabled:text-gray-400"
                       >
-                        {issue.parent.title}
+                        変更
                       </button>
-                    </dd>
+                    )}
                   </div>
-                )}
+                  
+                  {showHierarchySelector && userRole === 'editor' && allIssues.length > 0 ? (
+                    <div className="border rounded-md p-3 bg-gray-50">
+                      <ParentIssueSelector
+                        currentIssue={issue}
+                        allIssues={allIssues}
+                        onParentChange={handleHierarchyChange}
+                        isLoading={hierarchyState.isLoading}
+                      />
+                      <div className="flex justify-end mt-2">
+                        <button
+                          onClick={() => setShowHierarchySelector(false)}
+                          className="text-sm text-gray-600 hover:text-gray-800"
+                        >
+                          キャンセル
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <dd className="mt-1">
+                      {issue.parent ? (
+                        <button
+                          onClick={() => window.open(`/projects/${projectId}/issues/${issue.parent!.id}`, '_blank')}
+                          className="text-sm text-blue-600 hover:text-blue-800"
+                        >
+                          {issue.parent.wbs_number && (
+                            <span className="mr-1">{issue.parent.wbs_number}</span>
+                          )}
+                          {issue.parent.title}
+                        </button>
+                      ) : (
+                        <span className="text-sm text-gray-500">ルートレベル</span>
+                      )}
+                    </dd>
+                  )}
+                </div>
 
                 {/* ラベル */}
                 {issue.labels && issue.labels.length > 0 && (
