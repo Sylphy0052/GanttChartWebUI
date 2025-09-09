@@ -197,18 +197,77 @@ POST   /backup/export/:projectId         # エクスポート
 - **E2Eテスト**: Cypress (`cypress/e2e/`)
 - **設定**: `cypress.config.ts`
 
-### テスト実行
+### テスト実行（必須：コンテナ内で実行）
+
+**重要**: テスト実行は必ずDockerコンテナ内で行ってください。ローカル環境でのテスト実行は環境差異により結果が不正確になる可能性があります。
 
 ```bash
-# Backend
-cd backend
-npm run test      # 全ユニットテスト
-npm run test:e2e  # E2Eテスト
+# Backend テスト（Dockerコンテナ内）
+docker compose -f infra/docker-compose.yml exec backend npm run test
+docker compose -f infra/docker-compose.yml exec backend npm run test:e2e
+docker compose -f infra/docker-compose.yml exec backend npm run test:cov
 
-# Frontend E2E
-cd frontend
-npm run cypress:run  # ヘッドレス実行
-npm run cypress:open # UI起動
+# Frontend E2Eテスト（Dockerコンテナ内）
+docker compose -f infra/docker-compose.yml exec frontend npm run cypress:run
+docker compose -f infra/docker-compose.yml exec frontend npm run cypress:run -- --spec "cypress/e2e/wbs-tree.cy.ts"
+
+# 一時的なテスト用コンテナ起動（開発用）
+docker run --rm -v $(pwd)/backend:/app -w /app node:20-alpine npm test
+docker run --rm -v $(pwd)/frontend:/app -w /app cypress/included:13.8.1 cypress run
+
+# WBS機能テスト（特定テスト実行例）
+docker compose -f infra/docker-compose.yml exec backend npm test -- --testNamePattern="WBS"
+docker compose -f infra/docker-compose.yml exec frontend npm run cypress:run -- --spec "cypress/e2e/wbs-tree.cy.ts,cypress/e2e/issue-reorder.cy.ts"
+```
+
+### 既知の問題・制限事項
+
+#### Cypress E2Eテスト（Alpine Linux）
+
+**現在の状況**: Cypress 15.1.0でAlpine Linux環境での実行に技術的問題があります。
+
+**問題詳細**:
+
+- **シンボルエラー**: `posix_fallocate64: symbol not found`
+- **影響範囲**: Docker Compose開発環境でのCypress E2Eテスト実行
+- **調査済み対策**: udev、gcompat、libstdc++、chromium、firefoxパッケージを追加済み
+
+**回避策**:
+
+1. **一時的解決策**: Cypress公式Alpine Linuxイメージを使用
+
+   ```bash
+   # 代替Cypressテスト実行
+   docker run --rm --network infra_gantt-network \
+     -v $(pwd)/frontend:/e2e -w /e2e \
+     -e CYPRESS_baseUrl=http://frontend:3000 \
+     cypress/included:13.8.1 cypress run
+   ```
+
+2. **長期解決策（検討中）**:
+   - Cypress最新版での修正待ち
+   - Alpine LinuxからUbuntu Linuxベースイメージへの移行
+   - Playwright等への代替テストフレームワークの検討
+
+**開発時の対応**:
+
+- Backend単体テストはDockerコンテナ内で正常動作
+- Frontend E2EテストはローカルCypress UI（`npm run cypress:open`）で開発・デバッグ
+- CI/CD環境では別途Ubuntu環境を構築予定
+- 日本語で回答してください
+
+### テスト環境準備
+
+```bash
+# Docker環境起動（テスト前に必須）
+docker compose -f infra/docker-compose.yml up -d
+
+# コンテナ状態確認
+docker compose -f infra/docker-compose.yml ps
+
+# ログ確認
+docker compose -f infra/docker-compose.yml logs backend
+docker compose -f infra/docker-compose.yml logs frontend
 ```
 
 ## 開発ガイドライン
