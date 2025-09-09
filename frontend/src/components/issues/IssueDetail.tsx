@@ -11,6 +11,7 @@ import ChangeLogSection from './ChangeLogSection';
 import ImageUpload from '../uploads/ImageUpload';
 import ImageGallery from '../uploads/ImageGallery';
 import ParentIssueSelector from './ParentIssueSelector';
+import LabelBadge from '../common/LabelBadge';
 import MarkdownIt from 'markdown-it';
 
 interface IssueDetailProps {
@@ -364,6 +365,18 @@ const IssueDetail: React.FC<IssueDetailProps> = ({
                 </div>
               )}
 
+              {/* ラベル */}
+              {issue.labels && issue.labels.length > 0 && (
+                <div className="mb-6">
+                  <h3 className="text-sm font-medium text-gray-700 mb-2">ラベル</h3>
+                  <div className="flex flex-wrap gap-2">
+                    {issue.labels.map((label, index) => (
+                      <LabelBadge key={index} label={label} />
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {/* 進捗バー */}
               <div className="mb-6">
                 <div className="flex items-center justify-between mb-2">
@@ -386,10 +399,10 @@ const IssueDetail: React.FC<IssueDetailProps> = ({
                     <div className="flex items-center space-x-3">
                       <span
                         className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                          statusOptions.find(s => s.value === issue.parent.status)?.color || 'bg-gray-100 text-gray-800'
+                          statusOptions.find(s => s.value === issue.parent?.status)?.color || 'bg-gray-100 text-gray-800'
                         }`}
                       >
-                        {statusOptions.find(s => s.value === issue.parent.status)?.label || issue.parent.status}
+                        {statusOptions.find(s => s.value === issue.parent?.status)?.label || issue.parent?.status}
                       </span>
                       <span className="text-sm text-gray-900">
                         {issue.parent.wbs_number && (
