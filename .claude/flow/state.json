@@ -1,166 +1,8 @@
 {
   "phase": "implement",
   "current_milestone": "M5",
-  "current_task": {
-    "id": "M5-02", 
-    "title": "Backend: WBS番号生成ロジック実装",
-    "description": "階層構造に基づいてWBS番号（1.1.1形式）を自動生成する関数とAPIエンドポイントを実装",
-    "milestone": "M5",
-    "estimated_hours": 1.5,
-    "dependencies": [],
-    "files": [
-      "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/backend/src/issues/utils/wbs-number.util.ts",
-      "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/backend/src/issues/issues.service.ts",
-      "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/backend/src/issues/dto/issue-response.dto.ts"
-    ],
-    "acceptance_criteria": [
-      "階層構造とsort_orderに基づくWBS番号生成（1.1.1形式）",
-      "IssueResponseDTOにwbs_numberフィールド追加",
-      "親子関係変更時のWBS番号自動更新"
-    ],
-    "status": "pending"
-  },
+  "current_task": null,
   "next_tasks": [
-    {
-      "id": "M5-03",
-      "title": "Frontend: ドラッグ&ドロップライブラリ導入",
-      "description": "react-beautiful-dndまたは@dnd-kitを導入し、基本的なドラッグ&ドロップ機能の設定とテストを実装",
-      "milestone": "M5",
-      "estimated_hours": 1.0,
-      "dependencies": [],
-      "files": [
-        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/package.json",
-        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/hooks/useDragDrop.ts",
-        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/components/common/DraggableWrapper.tsx"
-      ],
-      "acceptance_criteria": [
-        "ドラッグ&ドロップライブラリの正常インストール",
-        "基本的なドラッグ&ドロップ動作の確認",
-        "TypeScript型定義の整備"
-      ],
-      "status": "pending"
-    },
-    {
-      "id": "M5-04",
-      "title": "Frontend: WBSツリーコンポーネント実装",
-      "description": "既存IssueListを拡張し、WBS番号表示とより視覚的な階層表示（展開/折りたたみ機能付き）を実装",
-      "milestone": "M5",
-      "estimated_hours": 2.5,
-      "dependencies": ["M5-02"],
-      "files": [
-        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/components/issues/WBSTreeView.tsx",
-        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/components/issues/WBSTreeNode.tsx",
-        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/hooks/useWBSTree.ts",
-        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/types/issue.ts"
-      ],
-      "acceptance_criteria": [
-        "WBS番号（1.1.1形式）の表示",
-        "階層レベルの視覚的インデント表示",
-        "展開/折りたたみ状態の管理",
-        "既存IssueListとの後方互換性維持"
-      ],
-      "status": "pending"
-    },
-    {
-      "id": "M5-05",
-      "title": "Frontend: ドラッグ&ドロップ並び替え機能実装",
-      "description": "WBSTreeViewにドラッグ&ドロップ機能を統合し、同一階層内でのIssue並び替えとBackend API連携を実装",
-      "milestone": "M5",
-      "estimated_hours": 2.5,
-      "dependencies": ["M5-01", "M5-03", "M5-04"],
-      "files": [
-        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/components/issues/DraggableWBSTree.tsx",
-        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/hooks/useIssueReorder.ts",
-        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/api/issues.ts"
-      ],
-      "acceptance_criteria": [
-        "同一階層内でのドラッグ&ドロップ並び替え",
-        "並び替え後のsort_order自動計算・API送信",
-        "ドラッグ中の視覚的フィードバック表示",
-        "エラー時の元位置への復元処理"
-      ],
-      "status": "pending"
-    },
-    {
-      "id": "M5-06",
-      "title": "Frontend: 階層構造変更UI実装",
-      "description": "Issue詳細画面で親Issue選択UIを拡張し、ドラッグ&ドロップによる階層間移動も対応",
-      "milestone": "M5",
-      "estimated_hours": 2.0,
-      "dependencies": ["M5-01", "M5-04"],
-      "files": [
-        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/components/issues/ParentIssueSelector.tsx",
-        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/components/issues/HierarchyChangeDragZone.tsx",
-        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/hooks/useHierarchyChange.ts"
-      ],
-      "acceptance_criteria": [
-        "Issue詳細画面での親Issue変更UI",
-        "ドラッグ&ドロップによる階層間移動（異なる親への移動）",
-        "循環参照防止のバリデーション",
-        "変更後のWBS番号即座更新"
-      ],
-      "status": "pending"
-    },
-    {
-      "id": "M5-07",
-      "title": "Frontend: WebSocket通知対応とUI統合",
-      "description": "WBS関連の変更（並び替え・階層変更）をSocket.IOで受信し、リアルタイムでUI更新する機能を実装",
-      "milestone": "M5",
-      "estimated_hours": 1.5,
-      "dependencies": ["M5-04", "M5-05"],
-      "files": [
-        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/hooks/useWBSWebSocket.ts",
-        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/components/websocket/NotificationHandler.tsx",
-        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/app/projects/[id]/issues/page.tsx"
-      ],
-      "acceptance_criteria": [
-        "WBS構造変更のSocket.IO通知受信",
-        "受信後のツリー表示即座更新",
-        "競合状態での適切なエラーハンドリング",
-        "既存通知システムとの統合"
-      ],
-      "status": "pending"
-    },
-    {
-      "id": "M5-08",
-      "title": "テスト: Backend WBS機能単体テスト実装",
-      "description": "並び替えAPI、階層変更API、WBS番号生成ロジックの単体テストをJestで実装",
-      "milestone": "M5",
-      "estimated_hours": 2.0,
-      "dependencies": ["M5-01", "M5-02"],
-      "files": [
-        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/backend/src/issues/issues.service.spec.ts",
-        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/backend/src/issues/utils/wbs-number.util.spec.ts",
-        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/backend/test/issues-reorder.e2e-spec.ts"
-      ],
-      "acceptance_criteria": [
-        "並び替えAPI・階層変更APIの正常系・異常系テスト",
-        "WBS番号生成ロジックの境界値テスト",
-        "楽観的排他制御の動作テスト",
-        "テストカバレッジ80%以上"
-      ],
-      "status": "pending"
-    },
-    {
-      "id": "M5-09",
-      "title": "テスト: Frontend WBS機能E2Eテスト実装",
-      "description": "CypressでWBSツリー表示、ドラッグ&ドロップ並び替え、階層変更のE2Eテストを実装",
-      "milestone": "M5",
-      "estimated_hours": 2.0,
-      "dependencies": ["M5-05", "M5-06", "M5-07"],
-      "files": [
-        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/cypress/e2e/wbs-tree.cy.ts",
-        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/cypress/e2e/issue-reorder.cy.ts",
-        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/cypress/support/wbs-commands.ts"
-      ],
-      "acceptance_criteria": [
-        "WBSツリー表示・展開折りたたみのテスト",
-        "ドラッグ&ドロップ並び替えの動作テスト",
-        "階層変更UIの操作テスト",
-        "リアルタイム通知受信のテスト"
-      ],
-      "status": "pending"
-    }
   ],
   "completed_tasks": [
     {
@@ -696,6 +538,110 @@
       "acceptance_criteria": ["PATCH /issues/reorder エンドポイントで複数Issueのsort_order一括更新が可能", "PATCH /issues/:id/hierarchy エンドポイントで親子関係変更が可能", "楽観的排他制御により競合状態を検出・エラー返却", "Socket.IO経由でリアルタイム通知配信"],
       "started_at": "2025-09-08T19:30:00Z",
       "completed_at": "2025-09-08T19:45:00Z"
+    },
+    {
+      "id": "M5-02",
+      "title": "Backend: WBS番号生成ロジック実装",
+      "description": "階層構造に基づいてWBS番号（1.1.1形式）を自動生成する関数とAPIエンドポイントを実装",
+      "milestone": "M5",
+      "estimated_hours": 1.5,
+      "status": "completed",
+      "dependencies": [],
+      "files": ["/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/backend/src/issues/utils/wbs-number.util.ts", "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/backend/src/issues/issues.service.ts", "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/backend/src/issues/dto/issue-response.dto.ts"],
+      "acceptance_criteria": ["階層構造とsort_orderに基づくWBS番号生成（1.1.1形式）", "IssueResponseDTOにwbs_numberフィールド追加", "親子関係変更時のWBS番号自動更新"],
+      "started_at": "2025-09-08T19:46:00Z",
+      "completed_at": "2025-09-08T20:30:00Z"
+    },
+    {
+      "id": "M5-03",
+      "title": "Frontend: ドラッグ&ドロップライブラリ導入",
+      "description": "react-beautiful-dndまたは@dnd-kitを導入し、基本的なドラッグ&ドロップ機能の設定とテストを実装",
+      "milestone": "M5",
+      "estimated_hours": 1.0,
+      "status": "completed",
+      "dependencies": [],
+      "files": ["/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/package.json", "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/hooks/useDragDrop.ts", "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/components/common/DraggableWrapper.tsx"],
+      "acceptance_criteria": ["ドラッグ&ドロップライブラリの正常インストール", "基本的なドラッグ&ドロップ動作の確認", "TypeScript型定義の整備"],
+      "started_at": "2025-09-08T20:31:00Z",
+      "completed_at": "2025-09-08T21:15:00Z"
+    },
+    {
+      "id": "M5-04",
+      "title": "Frontend: WBSツリーコンポーネント実装",
+      "description": "既存IssueListを拡張し、WBS番号表示とより視覚的な階層表示（展開/折りたたみ機能付き）を実装",
+      "milestone": "M5",
+      "estimated_hours": 2.5,
+      "status": "completed",
+      "dependencies": ["M5-02"],
+      "files": ["/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/components/issues/WBSTreeView.tsx", "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/components/issues/WBSTreeNode.tsx", "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/hooks/useWBSTree.ts", "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/types/issue.ts"],
+      "acceptance_criteria": ["WBS番号（1.1.1形式）の表示", "階層レベルの視覚的インデント表示", "展開/折りたたみ状態の管理", "既存IssueListとの後方互換性維持"],
+      "started_at": "2025-09-08T21:16:00Z",
+      "completed_at": "2025-09-08T21:45:00Z"
+    },
+    {
+      "id": "M5-05",
+      "title": "Frontend: ドラッグ&ドロップ並び替え機能実装",
+      "description": "WBSTreeViewにドラッグ&ドロップ機能を統合し、同一階層内でのIssue並び替えとBackend API連携を実装",
+      "milestone": "M5",
+      "estimated_hours": 2.5,
+      "status": "completed",
+      "dependencies": ["M5-01", "M5-03", "M5-04"],
+      "files": ["/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/components/issues/DraggableWBSTree.tsx", "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/hooks/useIssueReorder.ts", "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/api/issues.ts"],
+      "acceptance_criteria": ["同一階層内でのドラッグ&ドロップ並び替え", "並び替え後のsort_order自動計算・API送信", "ドラッグ中の視覚的フィードバック表示", "エラー時の元位置への復元処理"],
+      "started_at": "2025-09-08T21:46:00Z",
+      "completed_at": "2025-09-08T22:15:00Z"
+    },
+    {
+      "id": "M5-06",
+      "title": "Frontend: 階層構造変更UI実装",
+      "description": "Issue詳細画面で親Issue選択UIを拡張し、ドラッグ&ドロップによる階層間移動も対応",
+      "milestone": "M5",
+      "estimated_hours": 2.0,
+      "status": "completed",
+      "dependencies": ["M5-01", "M5-04"],
+      "files": ["/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/components/issues/ParentIssueSelector.tsx", "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/components/issues/HierarchyChangeDragZone.tsx", "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/hooks/useHierarchyChange.ts"],
+      "acceptance_criteria": ["Issue詳細画面での親Issue変更UI", "ドラッグ&ドロップによる階層間移動（異なる親への移動）", "循環参照防止のバリデーション", "変更後のWBS番号即座更新"],
+      "started_at": "2025-09-08T22:16:00Z",
+      "completed_at": "2025-09-08T22:45:00Z"
+    },
+    {
+      "id": "M5-07",
+      "title": "Frontend: WebSocket通知対応とUI統合",
+      "description": "WBS関連の変更（並び替え・階層変更）をSocket.IOで受信し、リアルタイムでUI更新する機能を実装",
+      "milestone": "M5",
+      "estimated_hours": 1.5,
+      "status": "completed",
+      "dependencies": ["M5-04", "M5-05"],
+      "files": ["/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/hooks/useWBSWebSocket.ts", "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/components/websocket/NotificationHandler.tsx", "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/app/projects/[id]/issues/page.tsx"],
+      "acceptance_criteria": ["WBS構造変更のSocket.IO通知受信", "受信後のツリー表示即座更新", "競合状態での適切なエラーハンドリング", "既存通知システムとの統合"],
+      "started_at": "2025-09-08T22:46:00Z",
+      "completed_at": "2025-09-08T23:15:00Z"
+    },
+    {
+      "id": "M5-08",
+      "title": "テスト: Backend WBS機能単体テスト実装",
+      "description": "並び替えAPI、階層変更API、WBS番号生成ロジックの単体テストをJestで実装",
+      "milestone": "M5",
+      "estimated_hours": 2.0,
+      "status": "completed",
+      "dependencies": ["M5-01", "M5-02"],
+      "files": ["/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/backend/src/issues/issues.service.spec.ts", "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/backend/src/issues/utils/wbs-number.util.spec.ts", "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/backend/test/issues-reorder.e2e-spec.ts"],
+      "acceptance_criteria": ["並び替えAPI・階層変更APIの正常系・異常系テスト", "WBS番号生成ロジックの境界値テスト", "楽観的排他制御の動作テスト", "テストカバレッジ80%以上"],
+      "started_at": "2025-09-08T23:16:00Z",
+      "completed_at": "2025-09-08T23:45:00Z"
+    },
+    {
+      "id": "M5-09",
+      "title": "テスト: Frontend WBS機能E2Eテスト実装",
+      "description": "CypressでWBSツリー表示、ドラッグ&ドロップ並び替え、階層変更のE2Eテストを実装",
+      "milestone": "M5",
+      "estimated_hours": 2.0,
+      "status": "completed",
+      "dependencies": ["M5-05", "M5-06", "M5-07"],
+      "files": ["/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/cypress/e2e/wbs-tree.cy.ts", "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/cypress/e2e/issue-reorder.cy.ts", "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/cypress/support/wbs-commands.ts"],
+      "acceptance_criteria": ["WBSツリー表示・展開折りたたみのテスト", "ドラッグ&ドロップ並び替えの動作テスト", "階層変更UIの操作テスト", "リアルタイム通知受信のテスト"],
+      "started_at": "2025-09-08T23:46:00Z",
+      "completed_at": "2025-09-09T00:15:00Z"
     }
   ],
   "milestones": {
@@ -727,7 +673,7 @@
     "M5": {
       "name": "WBS機能",
       "description": "WBS ツリー + 並び替え",
-      "status": "in_progress"
+      "status": "completed"
     },
     "M6": {
       "name": "ガント機能",
@@ -744,5 +690,5 @@
     "initial_render_ms_p95": 1500,
     "drag_latency_ms_p95": 100
   },
-  "updated_at": "2025-09-08T19:45:00Z"
+  "updated_at": "2025-09-09T00:15:00Z"
 }
