@@ -2,7 +2,8 @@ import { io, Socket } from 'socket.io-client';
 
 export interface WebSocketNotification {
   event: 'settings_changed' | 'issue_created' | 'issue_updated' | 'issue_deleted' | 
-         'comment_created' | 'comment_updated' | 'comment_deleted';
+         'comment_created' | 'comment_updated' | 'comment_deleted' |
+         'issues_reordered' | 'issue_hierarchy_changed';
   data: {
     message: string;
     timestamp: string;
@@ -11,6 +12,9 @@ export interface WebSocketNotification {
     entityType?: 'issue' | 'comment';
     entityId?: string;
     entity?: any;
+    // WBS関連の追加データ
+    affectedIssues?: any[];
+    wbsChangeType?: 'reorder' | 'hierarchy';
   };
 }
 
@@ -43,7 +47,11 @@ class WebSocketManager {
       return;
     }
 
-    const backendUrl = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001';
+    // WebSocket用のURLを設定
+    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8090';
+    const backendUrl = wsUrl.replace('ws://', 'http://').replace('wss://', 'https://');
+    
+    console.log('Connecting to WebSocket:', backendUrl);
     
     this.socket = io(backendUrl, {
       transports: ['websocket', 'polling'],
@@ -51,7 +59,7 @@ class WebSocketManager {
     });
 
     this.socket.on('connect', () => {
-      console.log('WebSocket connected');
+      console.log('WebSocket connected to:', backendUrl);
       this.isConnected = true;
       this.connectionListeners.forEach(listener => listener(true));
     });
@@ -126,7 +134,14 @@ class WebSocketManager {
   }
 
   getIsConnected() {
-    return this.isConnected;
+    const socketConnected = this.socket?.connected || false;
+    console.log('WebSocket status check:', {
+      isConnected: this.isConnected,
+      socketExists: !!this.socket,
+      socketConnected,
+      socketReadyState: this.socket?.connected ? 'connected' : 'disconnected'
+    });
+    return this.isConnected && socketConnected;
   }
 }
 
