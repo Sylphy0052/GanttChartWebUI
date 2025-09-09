@@ -34,11 +34,12 @@ async function bootstrap() {
     allowedHeaders: ['Content-Type', 'Authorization'],
   });
 
-  // ポート設定
+  // ポート設定 - Dockerコンテナ内では0.0.0.0でバインド
   const port = process.env.PORT || 3001;
+  const host = process.env.NODE_ENV === 'production' ? '0.0.0.0' : '0.0.0.0';
   
-  await app.listen(port);
-  logger.log(`🚀 Application is running on: http://localhost:${port}`);
+  await app.listen(port, host);
+  logger.log(`🚀 Application is running on: http://${host}:${port}`);
   logger.log('📊 Available endpoints:');
   logger.log('  GET    /health - Health check');
   logger.log('  GET    /projects - Get all projects');

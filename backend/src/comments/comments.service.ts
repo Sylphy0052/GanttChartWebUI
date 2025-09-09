@@ -51,12 +51,12 @@ export class CommentsService {
         throw new NotFoundException('指定されたIssueが見つかりません');
       }
 
-      // Comment作成（CreateCommentDtoのcontentをbody_mdにマッピング）
+      // Comment作成（body_mdを直接使用）
       const comment = await this.prisma.comment.create({
         data: {
           issue_id: issueId,
-          author: createCommentDto.author,
-          body_md: createCommentDto.content,
+          author: 'system', // 一時的にsystemとして作成（将来的にユーザー認証で置き換え）
+          body_md: createCommentDto.body_md,
           edited: false,
         },
       });
@@ -72,7 +72,7 @@ export class CommentsService {
             issue_id: issueId,
           },
           issue.project_id,
-          createCommentDto.author,
+          comment.author,
         );
       } catch (changeLogError) {
         this.logger.warn(`Failed to record change log for comment creation ${comment.id}: ${changeLogError.message}`);
@@ -95,7 +95,7 @@ export class CommentsService {
             title: issue.title,
             project_id: issue.project_id,
           },
-          author: createCommentDto.author,
+          author: comment.author,
         };
         
         await this.notificationGateway.notifyCommentChanged(commentNotificationData);
@@ -139,7 +139,7 @@ export class CommentsService {
           issue_id: issueId,
         },
         orderBy: {
-          created_at: 'asc',
+          created_at: 'desc',
         },
       });
 
@@ -214,16 +214,12 @@ export class CommentsService {
         edited: existingComment.edited,
       };
 
-      // 更新データ準備（contentがある場合はbody_mdにマッピングし、editedをtrueに）
+      // 更新データ準備（body_mdが更新される場合はedited=trueに設定）
       const updateData: any = {};
       
-      if (updateCommentDto.content !== undefined) {
-        updateData.body_md = updateCommentDto.content;
-        updateData.edited = true; // contentが更新される場合はeditedフラグをtrueに
-      }
-      
-      if (updateCommentDto.author !== undefined) {
-        updateData.author = updateCommentDto.author;
+      if (updateCommentDto.body_md !== undefined) {
+        updateData.body_md = updateCommentDto.body_md;
+        updateData.edited = true; // body_mdが更新される場合はeditedフラグをtrueに
       }
 
       const updatedComment = await this.prisma.comment.update({
@@ -249,7 +245,7 @@ export class CommentsService {
             updatedComment.id,
             changes,
             issue.project_id,
-            updateCommentDto.author || existingComment.author,
+            existingComment.author, // 既存のauthorを使用
           );
         }
       } catch (changeLogError) {
@@ -281,7 +277,7 @@ export class CommentsService {
               title: issue.title,
               project_id: issue.project_id,
             },
-            author: updateCommentDto.author || existingComment.author,
+            author: existingComment.author, // 既存のauthorを使用
           };
           
           await this.notificationGateway.notifyCommentChanged(commentNotificationData);

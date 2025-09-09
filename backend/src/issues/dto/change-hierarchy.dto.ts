@@ -1,5 +1,5 @@
 import { IsString, IsOptional, IsInt, Min } from 'class-validator';
-import { ApiProperty } from '@nestjs/swagger';
+// import { ApiProperty } from '@nestjs/swagger';
 
 /**
  * Issue階層変更要求DTO
@@ -19,20 +19,20 @@ import { ApiProperty } from '@nestjs/swagger';
  * - 循環参照の生成は不可
  */
 export class ChangeHierarchyDto {
-  @ApiProperty({
-    description: '新しい親IssueのID（nullで親なし）',
-    example: '12345678-1234-1234-1234-123456789012',
-    required: false,
-  })
+  // @ApiProperty({
+  //   description: '新しい親IssueのID（nullで親なし）',
+  //   example: '12345678-1234-1234-1234-123456789012',
+  //   required: false,
+  // })
   @IsOptional()
   @IsString()
   new_parent_id?: string | null;
 
-  @ApiProperty({
-    description: '楽観的排他制御用バージョン',
-    example: 5,
-    minimum: 0,
-  })
+  // @ApiProperty({
+  //   description: '楽観的排他制御用バージョン',
+  //   example: 5,
+  //   minimum: 0,
+  // })
   @IsInt()
   @Min(0)
   version: number;

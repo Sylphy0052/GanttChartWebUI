@@ -32,7 +32,7 @@ import { RequireRole } from '../common/decorators/require-role.decorator';
  * 
  * 各エンドポイントには適切なHTTPステータスコードとバリデーションを適用
  */
-@Controller()
+@Controller('projects/:projectId')
 @UseGuards(RoleGuard)
 export class CommentsController {
   private readonly logger = new Logger(CommentsController.name);
@@ -41,23 +41,28 @@ export class CommentsController {
 
   /**
    * Issue別コメント一覧取得
+   * @param projectId Project ID
    * @param issueId Issue ID
    * @returns コメント一覧（作成日時昇順）
    */
   @Get('issues/:issueId/comments')
   @HttpCode(HttpStatus.OK)
   @RequireRole('viewer')
-  async findByIssue(@Param('issueId') issueId: string): Promise<CommentResponseDto[]> {
-    this.logger.log(`GET /issues/${issueId}/comments - Fetching comments for issue`);
+  async findByIssue(
+    @Param('projectId') projectId: string,
+    @Param('issueId') issueId: string
+  ): Promise<CommentResponseDto[]> {
+    this.logger.log(`GET /projects/${projectId}/issues/${issueId}/comments - Fetching comments for issue`);
     
     const result = await this.commentsService.findByIssue(issueId);
     
-    this.logger.log(`GET /issues/${issueId}/comments - Returned ${result.length} comments`);
+    this.logger.log(`GET /projects/${projectId}/issues/${issueId}/comments - Returned ${result.length} comments`);
     return result;
   }
 
   /**
    * コメント作成
+   * @param projectId Project ID
    * @param issueId Issue ID
    * @param createCommentDto 作成データ
    * @returns 作成されたコメント
@@ -66,20 +71,22 @@ export class CommentsController {
   @HttpCode(HttpStatus.CREATED)
   @RequireRole('editor')
   async create(
+    @Param('projectId') projectId: string,
     @Param('issueId') issueId: string,
     @Body(new ValidationPipe({ whitelist: true, transform: true })) 
     createCommentDto: CreateCommentDto,
   ): Promise<CommentResponseDto> {
-    this.logger.log(`POST /issues/${issueId}/comments - Creating comment: ${createCommentDto.content?.substring(0, 50) || 'N/A'}...`);
+    this.logger.log(`POST /projects/${projectId}/issues/${issueId}/comments - Creating comment: ${createCommentDto.body_md?.substring(0, 50) || 'N/A'}...`);
     
     const result = await this.commentsService.create(issueId, createCommentDto);
     
-    this.logger.log(`POST /issues/${issueId}/comments - Comment created successfully: ${result.id}`);
+    this.logger.log(`POST /projects/${projectId}/issues/${issueId}/comments - Comment created successfully: ${result.id}`);
     return result;
   }
 
   /**
    * コメント編集
+   * @param projectId Project ID
    * @param id Comment ID
    * @param updateCommentDto 更新データ
    * @returns 更新されたコメント
@@ -88,30 +95,35 @@ export class CommentsController {
   @HttpCode(HttpStatus.OK)
   @RequireRole('editor')
   async update(
+    @Param('projectId') projectId: string,
     @Param('id') id: string,
     @Body(new ValidationPipe({ whitelist: true, transform: true, skipMissingProperties: true })) 
     updateCommentDto: UpdateCommentDto,
   ): Promise<CommentResponseDto> {
-    this.logger.log(`PUT /comments/${id} - Updating comment`);
+    this.logger.log(`PUT /projects/${projectId}/comments/${id} - Updating comment`);
     
     const result = await this.commentsService.update(id, updateCommentDto);
     
-    this.logger.log(`PUT /comments/${id} - Comment updated successfully`);
+    this.logger.log(`PUT /projects/${projectId}/comments/${id} - Comment updated successfully`);
     return result;
   }
 
   /**
    * コメント削除
+   * @param projectId Project ID
    * @param id Comment ID
    */
   @Delete('comments/:id')
   @HttpCode(HttpStatus.NO_CONTENT)
   @RequireRole('editor')
-  async remove(@Param('id') id: string): Promise<void> {
-    this.logger.log(`DELETE /comments/${id} - Deleting comment`);
+  async remove(
+    @Param('projectId') projectId: string,
+    @Param('id') id: string
+  ): Promise<void> {
+    this.logger.log(`DELETE /projects/${projectId}/comments/${id} - Deleting comment`);
     
     await this.commentsService.remove(id);
     
-    this.logger.log(`DELETE /comments/${id} - Comment deleted successfully`);
+    this.logger.log(`DELETE /projects/${projectId}/comments/${id} - Comment deleted successfully`);
   }
 }

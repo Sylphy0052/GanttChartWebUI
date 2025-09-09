@@ -132,11 +132,13 @@ export class AuthMiddleware implements NestMiddleware {
             break;
 
           case 'none':
-            // デフォルトでViewer権限を付与
+            // 開発環境では Editor 権限を付与、本番環境では Viewer 権限
+            const permission = process.env.NODE_ENV === 'development' ? 'editor' : 'viewer';
             req.user = {
               type: 'basic',
-              permission: 'viewer',
+              permission: permission,
             };
+            this.logger.log(`No auth mode: granted ${permission} permission (NODE_ENV=${process.env.NODE_ENV})`);
             break;
 
           default:

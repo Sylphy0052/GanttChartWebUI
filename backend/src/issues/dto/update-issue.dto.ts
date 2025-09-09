@@ -7,4 +7,6 @@ import { CreateIssueDto } from './create-issue.dto';
  * CreateIssueDtoのすべてのフィールドをオプションにして継承
  * 部分更新に対応（PATCH操作用）
  */
-export class UpdateIssueDto extends PartialType(CreateIssueDto) {}
+export class UpdateIssueDto extends PartialType(CreateIssueDto) {
+  version?: number;
+}

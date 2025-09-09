@@ -4,7 +4,7 @@ import { IsString, IsOptional, MaxLength, MinLength, IsDateString, IsEnum, IsNum
  * CreateIssueDto - Issue作成用DTO
  * 
  * バリデーション:
- * - project_id: 必須、文字列
+ * - project_id: URLパラメータから取得するため除外
  * - title: 必須、3-200文字
  * - description_md: オプショナル、最大10000文字
  * - assignee: オプショナル、文字列
@@ -19,8 +19,7 @@ import { IsString, IsOptional, MaxLength, MinLength, IsDateString, IsEnum, IsNum
  * - parent_id: オプショナル、親Issueの参照用
  */
 export class CreateIssueDto {
-  @IsString()
-  project_id: string;
+  // project_id はURLパラメータから取得するため、DTOから除外
 
   @IsOptional()
   @IsString()
