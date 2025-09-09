@@ -1,11 +1,13 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { IssueStatus, IssueFilters as IssueFiltersType } from '@/types/issue';
+import { issuesApi } from '@/lib/api';
 
 interface IssueFiltersProps {
   filters: IssueFiltersType;
   onFiltersChange: (filters: IssueFiltersType) => void;
+  projectId: string;
 }
 
 const statusOptions: Array<{ value: IssueStatus; label: string; color: string }> = [
@@ -23,7 +25,27 @@ const sortOptions = [
   { value: 'end_date', label: '終了日' },
 ] as const;
 
-const IssueFilters: React.FC<IssueFiltersProps> = ({ filters, onFiltersChange }) => {
+const IssueFilters: React.FC<IssueFiltersProps> = ({ filters, onFiltersChange, projectId }) => {
+  const [assigneeSuggestions, setAssigneeSuggestions] = useState<string[]>([]);
+  const [showAssigneeDropdown, setShowAssigneeDropdown] = useState(false);
+
+  // 担当者一覧を取得
+  useEffect(() => {
+    const loadAssignees = async () => {
+      try {
+        const assignees = await issuesApi.getAssignees(projectId);
+        setAssigneeSuggestions(assignees);
+      } catch (error) {
+        console.error('Failed to load assignees:', error);
+        setAssigneeSuggestions([]);
+      }
+    };
+
+    if (projectId) {
+      loadAssignees();
+    }
+  }, [projectId]);
+
   const handleStatusToggle = (status: IssueStatus) => {
     const currentStatuses = filters.status || [];
     const newStatuses = currentStatuses.includes(status)
@@ -42,6 +64,20 @@ const IssueFilters: React.FC<IssueFiltersProps> = ({ filters, onFiltersChange })
       assignee: assignee.trim() || undefined,
     });
   };
+
+  const handleAssigneeSelect = useCallback((assignee: string) => {
+    handleAssigneeChange(assignee);
+    setShowAssigneeDropdown(false);
+  }, []);
+
+  const handleAssigneeInputChange = (value: string) => {
+    handleAssigneeChange(value);
+    setShowAssigneeDropdown(value.length > 0);
+  };
+
+  const filteredAssignees = assigneeSuggestions.filter(assignee =>
+    assignee.toLowerCase().includes((filters.assignee || '').toLowerCase())
+  );
 
   const handleSortChange = (sortBy: typeof sortOptions[number]['value']) => {
     onFiltersChange({
@@ -95,18 +131,36 @@ const IssueFilters: React.FC<IssueFiltersProps> = ({ filters, onFiltersChange })
           </div>
 
           {/* 担当者 フィルター */}
-          <div className="flex-1">
+          <div className="flex-1 relative">
             <label htmlFor="assignee-filter" className="block text-sm font-medium text-gray-700 mb-2">
               担当者
             </label>
-            <input
-              id="assignee-filter"
-              type="text"
-              placeholder="担当者名で絞り込み"
-              value={filters.assignee || ''}
-              onChange={(e) => handleAssigneeChange(e.target.value)}
-              className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-            />
+            <div className="relative">
+              <input
+                id="assignee-filter"
+                type="text"
+                placeholder="担当者名で絞り込み"
+                value={filters.assignee || ''}
+                onChange={(e) => handleAssigneeInputChange(e.target.value)}
+                onFocus={() => setShowAssigneeDropdown(true)}
+                onBlur={() => setTimeout(() => setShowAssigneeDropdown(false), 200)}
+                className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm text-gray-900 bg-white placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+              />
+              {showAssigneeDropdown && assigneeSuggestions.length > 0 && (
+                <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-auto">
+                  {filteredAssignees.slice(0, 10).map((assignee, index) => (
+                    <button
+                      key={`${assignee}-${index}`}
+                      type="button"
+                      onClick={() => handleAssigneeSelect(assignee)}
+                      className="w-full px-3 py-2 text-left text-gray-900 hover:bg-gray-100 focus:outline-none focus:bg-gray-100"
+                    >
+                      {assignee}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
           {/* ソート */}
@@ -118,7 +172,7 @@ const IssueFilters: React.FC<IssueFiltersProps> = ({ filters, onFiltersChange })
               <select
                 value={filters.sortBy || 'created_at'}
                 onChange={(e) => handleSortChange(e.target.value as typeof sortOptions[number]['value'])}
-                className="flex-1 px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                className="flex-1 px-3 py-2 border border-gray-300 rounded-md shadow-sm text-gray-900 bg-white focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
               >
                 {sortOptions.map(({ value, label }) => (
                   <option key={value} value={value}>
@@ -129,7 +183,7 @@ const IssueFilters: React.FC<IssueFiltersProps> = ({ filters, onFiltersChange })
               <select
                 value={filters.sortOrder || 'desc'}
                 onChange={(e) => handleSortOrderChange(e.target.value as 'asc' | 'desc')}
-                className="px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                className="px-3 py-2 border border-gray-300 rounded-md shadow-sm text-gray-900 bg-white focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
               >
                 <option value="desc">降順</option>
                 <option value="asc">昇順</option>

@@ -245,6 +245,66 @@ export class IssuesService {
   }
 
   /**
+   * Issue詳細取得（コメント・変更履歴込み）
+   * @param projectId プロジェクトID
+   * @param issueId IssueID
+   * @returns Issue詳細データ
+   */
+  /**
+   * Issue詳細取得（コメント・変更履歴込み）
+   * @param projectId プロジェクトID
+   * @param issueId IssueID
+   * @returns Issue詳細データ
+   */
+  /**
+   * Issue詳細取得（コメント・変更履歴込み）
+   * @param projectId プロジェクトID
+   * @param issueId IssueID
+   * @returns Issue詳細データ
+   */
+  async findOneWithDetails(projectId: string, issueId: string): Promise<any> {
+    this.logger.log(`Finding issue with details: ${issueId} in project: ${projectId}`);
+
+    try {
+      // Issue基本情報を取得
+      const issue = await this.findOne(projectId, issueId);
+
+      // コメント取得（新しい順）
+      const comments = await this.prisma.comment.findMany({
+        where: {
+          issue_id: issueId,
+        },
+        orderBy: { created_at: 'desc' },
+      });
+
+      // 変更履歴取得
+      const changeLogs = await this.changeLogService.getChangeLogsByEntity(issueId);
+
+      // 添付ファイル取得
+      const uploadedFiles = await this.uploadsService.getImagesByIssue(issueId);
+
+      this.logger.log(`Found issue with details: ${issueId} (${comments.length} comments, ${changeLogs.length} change logs, ${uploadedFiles.length} files)`);
+
+      return {
+        ...issue,
+        comments: comments.map(comment => ({
+          id: comment.id,
+          body_md: comment.body_md,
+          author: comment.author,
+          created_at: comment.created_at,
+          updated_at: comment.updated_at,
+          is_edited: comment.edited || comment.created_at.getTime() !== comment.updated_at.getTime(),
+        })),
+        changeLog: changeLogs,
+        uploadedFiles: uploadedFiles,
+      };
+    } catch (error) {
+      this.logger.error(`Failed to find issue with details ${issueId} in project ${projectId}: ${error.message}`, error);
+      throw error;
+    }
+  }
+
+  /**
    * Issue更新
    * @param projectId プロジェクトID
    * @param issueId IssueID
@@ -471,6 +531,9 @@ export class IssuesService {
    * @throws ConflictException 楽観的排他制御エラー
    * @throws BadRequestException 空配列または重複IDの場合
    */
+  // プロジェクト単位でのreorder操作の排他制御
+  private static reorderLocks = new Map<string, Promise<any>>();
+
   async reorderIssues(reorderIssuesDto: ReorderIssuesDto): Promise<IssueResponseDto[]> {
     this.logger.log(`Reordering ${reorderIssuesDto.issues.length} issues`);
 
@@ -478,6 +541,33 @@ export class IssuesService {
       throw new BadRequestException('並び替え対象のIssueが指定されていません');
     }
 
+    // プロジェクト単位での排他制御のためのロックキー生成
+    const issueIds = reorderIssuesDto.issues.map(item => item.id).sort();
+    const lockKey = `reorder_${issueIds.join('_')}`;
+    
+    // 同時実行を防ぐためのロック処理
+    if (IssuesService.reorderLocks.has(lockKey)) {
+      this.logger.warn(`Concurrent reorder operation detected for issues: ${issueIds.join(', ')} - waiting for previous operation to complete`);
+      try {
+        await IssuesService.reorderLocks.get(lockKey);
+      } catch (error) {
+        // 前の操作がエラーで終了してもこの操作は続行する
+        this.logger.warn('Previous reorder operation failed, continuing with current operation');
+      }
+    }
+
+    const currentOperation = this.executeReorderOperation(reorderIssuesDto);
+    IssuesService.reorderLocks.set(lockKey, currentOperation);
+
+    try {
+      const result = await currentOperation;
+      return result;
+    } finally {
+      IssuesService.reorderLocks.delete(lockKey);
+    }
+  }
+
+  private async executeReorderOperation(reorderIssuesDto: ReorderIssuesDto): Promise<IssueResponseDto[]> {
     try {
       // 重複IDチェック
       const issueIds = reorderIssuesDto.issues.map(item => item.id);
@@ -491,31 +581,45 @@ export class IssuesService {
 
       // トランザクション内で一括更新
       await this.prisma.$transaction(async (prisma) => {
-        for (const item of reorderIssuesDto.issues) {
-          // 既存Issueの取得・検証
-          const existingIssue = await prisma.issue.findFirst({
-            where: {
-              id: item.id,
-              is_deleted: false,
-            },
-          });
+        // まず全てのIssueの最新版を取得してバージョンを確定
+        const issueIds = reorderIssuesDto.issues.map(item => item.id);
+        const uniqueIds = [...new Set(issueIds)]; // 重複除去
+        
+        const existingIssues = await prisma.issue.findMany({
+          where: {
+            id: { in: uniqueIds },
+            is_deleted: false,
+          },
+        });
 
+        if (existingIssues.length !== uniqueIds.length) {
+          const foundIds = existingIssues.map(issue => issue.id);
+          const missingIds = uniqueIds.filter(id => !foundIds.includes(id));
+          throw new NotFoundException(`指定されたIssueが見つかりません: ${missingIds.join(', ')}`);
+        }
+
+        // プロジェクトIDを統一チェック
+        const projectIds = [...new Set(existingIssues.map(issue => issue.project_id))];
+        if (projectIds.length > 1) {
+          throw new BadRequestException('異なるプロジェクトのIssueが混在しています');
+        }
+        projectId = projectIds[0];
+
+        // IDからIssueのマップを作成（最新版を保持）
+        const issueMap = new Map(existingIssues.map(issue => [issue.id, issue]));
+
+        // 各アイテムを更新（最新のversionを使用）
+        for (const item of reorderIssuesDto.issues) {
+          const existingIssue = issueMap.get(item.id);
           if (!existingIssue) {
             throw new NotFoundException(`指定されたIssue ${item.id} が見つかりません`);
           }
 
-          // プロジェクトIDを統一チェック（最初のもので固定）
-          if (!projectId) {
-            projectId = existingIssue.project_id;
-          } else if (projectId !== existingIssue.project_id) {
-            throw new BadRequestException('異なるプロジェクトのIssueが混在しています');
-          }
-
-          // 楽観的排他制御を使用して更新
+          // 最新のversionを使用して楽観的排他制御
           const updatedIssue = await prisma.issue.update({
             where: {
               id: item.id,
-              version: item.version, // 楽観的排他制御
+              version: existingIssue.version, // 最新のversionを使用
             },
             data: {
               sort_order: item.sort_order,
@@ -523,7 +627,10 @@ export class IssuesService {
             },
           });
 
-          updatedIssues.push(this.toResponseDto(updatedIssue, projectId));
+          updatedIssues.push(await this.toResponseDto(updatedIssue, projectId));
+          
+          // 更新されたIssueの情報をマップにも反映（同じIssueが複数回更新される場合に備えて）
+          issueMap.set(item.id, updatedIssue);
         }
       });
 
@@ -813,12 +920,43 @@ export class IssuesService {
   }
 
   /**
+   * プロジェクト内の削除されていないIssueの担当者一覧を取得（重複排除）
+   */
+  async getProjectAssignees(projectId: string): Promise<string[]> {
+    this.logger.log(`Getting assignees for project: ${projectId}`);
+
+    // プロジェクト内の削除されていないIssueから担当者を取得
+    const issues = await this.prisma.issue.findMany({
+      where: {
+        project_id: projectId,
+        is_deleted: false,
+        assignee: {
+          not: null,
+        },
+      },
+      select: {
+        assignee: true,
+      },
+      distinct: ['assignee'],
+    });
+
+    // null チェックと重複排除を行い、アルファベット順にソート
+    const assignees = issues
+      .map(issue => issue.assignee)
+      .filter((assignee): assignee is string => assignee !== null && assignee.trim() !== '')
+      .sort();
+
+    this.logger.log(`Found ${assignees.length} unique assignees for project ${projectId}`);
+    return assignees;
+  }
+
+  /**
    * IssueをIssueResponseDTOに変換（WBS番号付き）
    * @param issue Issueエンティティ
    * @param projectId プロジェクトID
    * @returns IssueResponseDTO
    */
-  private async toResponseDto(issue: Issue, projectId: string): Promise<IssueResponseDto> {
+  private async toResponseDto(issue: any, projectId: string): Promise<IssueResponseDto> {
     // プロジェクト内の全Issue取得（WBS番号算出用）
     const allIssues = await this.prisma.issue.findMany({
       where: {
@@ -841,6 +979,60 @@ export class IssuesService {
     // 対象IssueのWBS番号を計算
     const wbsNumber = calculateSingleWBSNumber(issue.id, wbsData) || '1';
 
+    // 親Issueの処理（再帰を避けるため基本情報のみ）
+    let parentDto: IssueResponseDto | undefined;
+    if (issue.parent) {
+      const parentWbsNumber = calculateSingleWBSNumber(issue.parent.id, wbsData) || '1';
+      parentDto = {
+        id: issue.parent.id,
+        project_id: issue.parent.project_id,
+        parent_id: issue.parent.parent_id,
+        title: issue.parent.title,
+        description_md: issue.parent.description_md,
+        assignee: issue.parent.assignee,
+        status: issue.parent.status,
+        start_date: issue.parent.start_date,
+        end_date: issue.parent.end_date,
+        progress_pct: issue.parent.progress_pct,
+        effort_hours: issue.parent.effort_hours,
+        is_blocked: issue.parent.is_blocked,
+        sort_order: issue.parent.sort_order,
+        labels: issue.parent.labels,
+        version: issue.parent.version,
+        created_at: issue.parent.created_at,
+        updated_at: issue.parent.updated_at,
+        wbs_number: parentWbsNumber,
+      } as IssueResponseDto;
+    }
+
+    // 子Issueの処理（再帰を避けるため基本情報のみ）
+    let childrenDto: IssueResponseDto[] | undefined;
+    if (issue.children && issue.children.length > 0) {
+      childrenDto = issue.children.map((child: any) => {
+        const childWbsNumber = calculateSingleWBSNumber(child.id, wbsData) || '1';
+        return {
+          id: child.id,
+          project_id: child.project_id,
+          parent_id: child.parent_id,
+          title: child.title,
+          description_md: child.description_md,
+          assignee: child.assignee,
+          status: child.status,
+          start_date: child.start_date,
+          end_date: child.end_date,
+          progress_pct: child.progress_pct,
+          effort_hours: child.effort_hours,
+          is_blocked: child.is_blocked,
+          sort_order: child.sort_order,
+          labels: child.labels,
+          version: child.version,
+          created_at: child.created_at,
+          updated_at: child.updated_at,
+          wbs_number: childWbsNumber,
+        } as IssueResponseDto;
+      });
+    }
+
     return plainToClass(IssueResponseDto, {
       id: issue.id,
       project_id: issue.project_id,
@@ -860,6 +1052,8 @@ export class IssuesService {
       created_at: issue.created_at,
       updated_at: issue.updated_at,
       wbs_number: wbsNumber,
+      parent: parentDto,
+      children: childrenDto,
     });
   }
 }

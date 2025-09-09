@@ -8,10 +8,10 @@ import { UploadedFile, FileUploadResponse } from '@/types/upload';
 const getApiBaseUrl = () => {
   // サーバーサイド（Docker内部）では backend サービス名を使用
   if (typeof window === 'undefined') {
-    return process.env.NEXT_PUBLIC_API_URL || 'http://backend:3002';
+    return 'http://backend:3002';
   }
-  // クライアントサイド（ブラウザ）では localhost を使用
-  return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3012';
+  // クライアントサイド（ブラウザ）では nginx proxy経由でアクセス
+  return process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8090';
 };
 
 export class ApiError extends Error {
@@ -46,6 +46,11 @@ async function apiRequest<T>(
       response.status,
       errorData
     );
+  }
+
+  // 204 No Content または空のレスポンスの場合
+  if (response.status === 204 || response.headers.get('content-length') === '0') {
+    return null as T;
   }
 
   return response.json();
@@ -143,6 +148,17 @@ export const projectsApi = {
   },
 };
 
+// Issue並び替え用の型定義
+export interface IssueReorderItem {
+  id: string;
+  sort_order: number;
+  version: number;
+}
+
+export interface IssueReorderDto {
+  issues: IssueReorderItem[];
+}
+
 export const issuesApi = {
   // Issue一覧取得
   getAll: (projectId: string): Promise<Issue[]> => {
@@ -181,6 +197,19 @@ export const issuesApi = {
       method: 'DELETE',
     });
   },
+
+  // Issue並び替え
+  reorder: (projectId: string, data: IssueReorderDto): Promise<Issue[]> => {
+    return apiRequest<Issue[]>(`/issues/reorder`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    });
+  },
+
+  // プロジェクト内の担当者一覧取得
+  getAssignees: (projectId: string): Promise<string[]> => {
+    return apiRequest<string[]>(`/projects/${projectId}/assignees`);
+  },
 };
 
 export const commentsApi = {
@@ -199,7 +228,7 @@ export const commentsApi = {
 
   // コメント更新
   update: (projectId: string, issueId: string, commentId: string, data: UpdateCommentDto): Promise<Comment> => {
-    return apiRequest<Comment>(`/projects/${projectId}/issues/${issueId}/comments/${commentId}`, {
+    return apiRequest<Comment>(`/projects/${projectId}/comments/${commentId}`, {
       method: 'PUT',
       body: JSON.stringify(data),
     });
@@ -207,7 +236,7 @@ export const commentsApi = {
 
   // コメント削除
   delete: (projectId: string, issueId: string, commentId: string): Promise<void> => {
-    return apiRequest<void>(`/projects/${projectId}/issues/${issueId}/comments/${commentId}`, {
+    return apiRequest<void>(`/projects/${projectId}/comments/${commentId}`, {
       method: 'DELETE',
     });
   },

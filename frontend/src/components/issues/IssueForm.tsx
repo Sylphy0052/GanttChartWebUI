@@ -1,8 +1,10 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Issue, CreateIssueDto, UpdateIssueDto, IssueStatus } from '@/types/issue';
+import { issuesApi, ApiError } from '@/lib/api';
 import ParentIssueSelector from './ParentIssueSelector';
+import MarkdownEditor from '@/components/common/MarkdownEditor';
 
 interface IssueFormProps {
   mode: 'create' | 'edit';
@@ -70,6 +72,14 @@ const IssueForm: React.FC<IssueFormProps> = ({
 
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({});
   const [labelInput, setLabelInput] = useState('');
+  const [allIssues, setAllIssues] = useState<Issue[]>([]);
+  const [isLoadingIssues, setIsLoadingIssues] = useState(false);
+  
+  // 既存の担当者とラベルの提案用データ
+  const [assigneeSuggestions, setAssigneeSuggestions] = useState<string[]>([]);
+  const [labelSuggestions, setLabelSuggestions] = useState<string[]>([]);
+  const [showAssigneeDropdown, setShowAssigneeDropdown] = useState(false);
+  const [showLabelDropdown, setShowLabelDropdown] = useState(false);
 
   const validateForm = (): boolean => {
     const errors: Record<string, string> = {};
@@ -125,7 +135,7 @@ const IssueForm: React.FC<IssueFormProps> = ({
     }
   };
 
-  const handleInputChange = (field: keyof (CreateIssueDto | UpdateIssueDto), value: any) => {
+  const handleInputChange = useCallback((field: keyof (CreateIssueDto | UpdateIssueDto), value: any) => {
     setFormData(prev => ({
       ...prev,
       [field]: value,
@@ -138,7 +148,7 @@ const IssueForm: React.FC<IssueFormProps> = ({
         return rest;
       });
     }
-  };
+  }, [validationErrors]);
 
   const handleAddLabel = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && labelInput.trim()) {
@@ -154,6 +164,80 @@ const IssueForm: React.FC<IssueFormProps> = ({
   const handleRemoveLabel = (labelToRemove: string) => {
     handleInputChange('labels', formData.labels?.filter(label => label !== labelToRemove) || []);
   };
+
+  // プロジェクトのIssue一覧を取得し、担当者・ラベルの提案データを作成
+  useEffect(() => {
+    const loadIssues = async () => {
+      try {
+        setIsLoadingIssues(true);
+        const issues = await issuesApi.getAll(projectId);
+        setAllIssues(issues);
+        
+        // 担当者一覧を専用APIから取得
+        const assignees = await issuesApi.getAssignees(projectId);
+        setAssigneeSuggestions(assignees);
+        
+        // 既存のラベルを収集（重複除去・空文字除去）
+        const labels = [...new Set(
+          issues
+            .flatMap(issue => issue.labels || [])
+            .filter(label => label && label.trim())
+        )].sort();
+        setLabelSuggestions(labels);
+      } catch (error) {
+        console.error('Failed to load issues:', error);
+        setAllIssues([]);
+        setAssigneeSuggestions([]);
+        setLabelSuggestions([]);
+      } finally {
+        setIsLoadingIssues(false);
+      }
+    };
+
+    if (projectId) {
+      loadIssues();
+    }
+  }, [projectId]);
+
+  const handleParentChange = useCallback((parentId: string | null) => {
+    handleInputChange('parent_id', parentId);
+  }, [handleInputChange]);
+
+  // 担当者の選択・入力処理
+  const handleAssigneeSelect = useCallback((assignee: string) => {
+    handleInputChange('assignee', assignee);
+    setShowAssigneeDropdown(false);
+  }, [handleInputChange]);
+
+  const handleAssigneeInputChange = useCallback((value: string) => {
+    handleInputChange('assignee', value);
+    setShowAssigneeDropdown(value.length > 0);
+  }, [handleInputChange]);
+
+  // ラベルのオートコンプリート処理
+  const handleLabelSelect = useCallback((label: string) => {
+    if (!formData.labels?.includes(label)) {
+      handleInputChange('labels', [...(formData.labels || []), label]);
+    }
+    setLabelInput('');
+    setShowLabelDropdown(false);
+  }, [formData.labels, handleInputChange]);
+
+  const handleLabelInputChange = useCallback((value: string) => {
+    setLabelInput(value);
+    setShowLabelDropdown(true);
+  }, []);
+
+  // 担当者の絞り込み
+  const filteredAssignees = assigneeSuggestions.filter(assignee =>
+    assignee.toLowerCase().includes((formData.assignee || '').toLowerCase())
+  );
+
+  // ラベルの絞り込み
+  const filteredLabels = labelSuggestions.filter(label =>
+    label.toLowerCase().includes(labelInput.toLowerCase()) &&
+    !formData.labels?.includes(label)
+  );
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -194,10 +278,11 @@ const IssueForm: React.FC<IssueFormProps> = ({
             {/* 親Issue選択 */}
             <div>
               <ParentIssueSelector
-                projectId={projectId}
-                value={formData.parent_id}
-                onChange={(parentId) => handleInputChange('parent_id', parentId)}
-                excludeIssueId={mode === 'edit' ? initialData?.id : undefined}
+                currentIssue={mode === 'edit' ? initialData : null}
+                allIssues={allIssues || []}
+                selectedParentId={formData.parent_id || null}
+                onParentChange={handleParentChange}
+                isLoading={isLoadingIssues}
                 disabled={isLoading}
               />
             </div>
@@ -212,7 +297,7 @@ const IssueForm: React.FC<IssueFormProps> = ({
                 type="text"
                 value={formData.title || ''}
                 onChange={(e) => handleInputChange('title', e.target.value)}
-                className={`block w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm ${
+                className={`block w-full px-3 py-2 border rounded-md shadow-sm text-gray-900 bg-white placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm ${
                   validationErrors.title ? 'border-red-300' : 'border-gray-300'
                 }`}
                 placeholder="Issueのタイトルを入力"
@@ -225,17 +310,15 @@ const IssueForm: React.FC<IssueFormProps> = ({
 
             {/* 説明 */}
             <div>
-              <label htmlFor="description" className="block text-sm font-medium text-gray-700 mb-2">
+              <label className="block text-sm font-medium text-gray-700 mb-2">
                 説明 (Markdown)
               </label>
-              <textarea
-                id="description"
-                rows={8}
+              <MarkdownEditor
                 value={formData.description_md || ''}
-                onChange={(e) => handleInputChange('description_md', e.target.value)}
-                className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                onChange={(value) => handleInputChange('description_md', value)}
                 placeholder="Issueの詳細説明をMarkdown形式で入力"
                 disabled={isLoading}
+                rows={8}
               />
             </div>
 
@@ -249,7 +332,7 @@ const IssueForm: React.FC<IssueFormProps> = ({
                   id="status"
                   value={formData.status || 'open'}
                   onChange={(e) => handleInputChange('status', e.target.value as IssueStatus)}
-                  className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                  className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm text-gray-900 bg-white focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
                   disabled={isLoading}
                 >
                   {statusOptions.map(({ value, label }) => (
@@ -261,19 +344,36 @@ const IssueForm: React.FC<IssueFormProps> = ({
               </div>
 
               {/* 担当者 */}
-              <div>
+              <div className="relative">
                 <label htmlFor="assignee" className="block text-sm font-medium text-gray-700 mb-2">
                   担当者
                 </label>
-                <input
-                  id="assignee"
-                  type="text"
-                  value={formData.assignee || ''}
-                  onChange={(e) => handleInputChange('assignee', e.target.value)}
-                  className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-                  placeholder="担当者名を入力"
-                  disabled={isLoading}
-                />
+                <div className="relative">
+                  <input
+                    id="assignee"
+                    type="text"
+                    value={formData.assignee || ''}
+                    onChange={(e) => handleAssigneeInputChange(e.target.value)}
+                    onFocus={() => setShowAssigneeDropdown(true)}
+                    onBlur={() => setTimeout(() => setShowAssigneeDropdown(false), 150)}
+                    className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm text-gray-900 bg-white placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                    placeholder="担当者名を入力または選択"
+                    disabled={isLoading}
+                  />
+                  {showAssigneeDropdown && assigneeSuggestions.length > 0 && (
+                    <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-40 overflow-y-auto">
+                      {filteredAssignees.slice(0, 5).map((assignee, index) => (
+                        <div
+                          key={index}
+                          onClick={() => handleAssigneeSelect(assignee)}
+                          className="px-3 py-2 cursor-pointer hover:bg-gray-50 text-gray-900"
+                        >
+                          {assignee}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -288,7 +388,7 @@ const IssueForm: React.FC<IssueFormProps> = ({
                   type="date"
                   value={typeof formData.start_date === 'string' ? formData.start_date : ''}
                   onChange={(e) => handleInputChange('start_date', e.target.value)}
-                  className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                  className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm text-gray-900 bg-white focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
                   disabled={isLoading}
                 />
               </div>
@@ -303,7 +403,7 @@ const IssueForm: React.FC<IssueFormProps> = ({
                   type="date"
                   value={typeof formData.end_date === 'string' ? formData.end_date : ''}
                   onChange={(e) => handleInputChange('end_date', e.target.value)}
-                  className={`block w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm ${
+                  className={`block w-full px-3 py-2 border rounded-md shadow-sm text-gray-900 bg-white focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm ${
                     validationErrors.end_date ? 'border-red-300' : 'border-gray-300'
                   }`}
                   disabled={isLoading}
@@ -327,7 +427,7 @@ const IssueForm: React.FC<IssueFormProps> = ({
                   step="0.5"
                   value={formData.effort_hours || ''}
                   onChange={(e) => handleInputChange('effort_hours', e.target.value ? parseFloat(e.target.value) : undefined)}
-                  className={`block w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm ${
+                  className={`block w-full px-3 py-2 border rounded-md shadow-sm text-gray-900 bg-white placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm ${
                     validationErrors.effort_hours ? 'border-red-300' : 'border-gray-300'
                   }`}
                   placeholder="見積時間を入力"
@@ -350,7 +450,7 @@ const IssueForm: React.FC<IssueFormProps> = ({
                   max="100"
                   value={formData.progress_pct || 0}
                   onChange={(e) => handleInputChange('progress_pct', parseInt(e.target.value) || 0)}
-                  className={`block w-full px-3 py-2 border rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm ${
+                  className={`block w-full px-3 py-2 border rounded-md shadow-sm text-gray-900 bg-white focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm ${
                     validationErrors.progress_pct ? 'border-red-300' : 'border-gray-300'
                   }`}
                   disabled={isLoading}
@@ -410,15 +510,33 @@ const IssueForm: React.FC<IssueFormProps> = ({
                     ))}
                   </div>
                 )}
-                <input
-                  type="text"
-                  value={labelInput}
-                  onChange={(e) => setLabelInput(e.target.value)}
-                  onKeyDown={handleAddLabel}
-                  className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-                  placeholder="ラベルを入力してEnterキーを押すか、クリックして追加"
-                  disabled={isLoading}
-                />
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={labelInput}
+                    onChange={(e) => handleLabelInputChange(e.target.value)}
+                    onKeyDown={handleAddLabel}
+                    onFocus={() => setShowLabelDropdown(true)}
+                    onBlur={() => setTimeout(() => setShowLabelDropdown(false), 150)}
+                    className="block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm text-gray-900 bg-white placeholder-gray-400 focus:outline-none focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
+                    placeholder="ラベルを入力・選択してEnterキーまたはクリックで追加"
+                    disabled={isLoading}
+                  />
+                  {showLabelDropdown && labelSuggestions.filter(label => !formData.labels?.includes(label)).length > 0 && (
+                    <div className="absolute z-10 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-40 overflow-y-auto">
+                      {filteredLabels.slice(0, 5).map((label, index) => (
+                        <div
+                          key={index}
+                          onClick={() => handleLabelSelect(label)}
+                          className="px-3 py-2 cursor-pointer hover:bg-gray-50 text-gray-900 flex items-center"
+                        >
+                          <span className="inline-block w-3 h-3 bg-blue-100 rounded-full mr-2"></span>
+                          {label}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 
