@@ -4,52 +4,6 @@
   "current_task": null,
   "next_tasks": [
     {
-      "id": "M6-07",
-      "title": "Frontend: 依存関係線表示機能",
-      "description": "依存関係の矢印線描画、SVGまたはCanvas活用、線の動的計算・描画",
-      "milestone": "M6",
-      "estimated_hours": 2.0,
-      "status": "pending",
-      "dependencies": ["M6-01", "M6-06"],
-      "files": [
-        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/components/gantt/DependencyLines.tsx",
-        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/utils/gantt-geometry.ts",
-        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/components/gantt/DependencyArrow.tsx"
-      ],
-      "acceptance_criteria": [
-        "FS（Finish-to-Start）依存関係の矢印線表示",
-        "先行タスク終了 → 後続タスク開始の視覚的接続",
-        "スクロール・リサイズ時の線の動的再計算",
-        "依存関係線のホバー・選択状態表示",
-        "複数依存関係の線重複回避アルゴリズム",
-        "パフォーマンス最適化（表示範囲外の線は非描画）"
-      ]
-    },
-    {
-      "id": "M6-08",
-      "title": "Frontend: ガントチャート上ドラッグ&ドロップ日程調整",
-      "description": "タスクバーのドラッグ&ドロップによる日程変更、依存関係制約チェック、Backend API連携",
-      "milestone": "M6", 
-      "estimated_hours": 3.0,
-      "status": "pending",
-      "dependencies": ["M6-06", "M6-07"],
-      "files": [
-        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/components/gantt/DraggableTaskBar.tsx",
-        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/hooks/useGanttDragDrop.ts",
-        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/api/gantt.ts",
-        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/utils/date-calculations.ts"
-      ],
-      "acceptance_criteria": [
-        "タスクバーの水平ドラッグによる日程変更",
-        "ドラッグ中の視覚的フィードバック（ゴーストバー・制約違反警告）",
-        "依存関係制約違反時の警告表示・操作ブロック",
-        "ドロップ時のBackend API呼び出し・Issue更新",
-        "エラー時の元位置復元処理",
-        "マイルストーン日程調整の特別処理（依存先の自動調整）",
-        "Editor権限のみドラッグ&ドロップ可能"
-      ]
-    },
-    {
       "id": "M6-09",
       "title": "Frontend: 依存関係作成・編集UI",
       "description": "依存関係の作成・削除UI、モーダルまたはコンテキストメニュー、線の直接接続操作",
@@ -141,6 +95,56 @@
     }
   ],
   "completed_tasks": [
+    {
+      "id": "M6-08",
+      "title": "Frontend: ガントチャート上ドラッグ&ドロップ日程調整",
+      "description": "タスクバーのドラッグ&ドロップによる日程変更、依存関係制約チェック、Backend API連携",
+      "milestone": "M6",
+      "estimated_hours": 3.0,
+      "status": "completed",
+      "dependencies": ["M6-06", "M6-07"],
+      "files": [
+        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/components/gantt/DraggableTaskBar.tsx",
+        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/hooks/useGanttDragDrop.ts",
+        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/api/gantt.ts",
+        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/utils/date-calculations.ts"
+      ],
+      "acceptance_criteria": [
+        "タスクバーの水平ドラッグによる日程変更",
+        "ドラッグ中の視覚的フィードバック（ゴーストバー・制約違反警告）",
+        "依存関係制約違反時の警告表示・操作ブロック",
+        "ドロップ時のBackend API呼び出し・Issue更新",
+        "エラー時の元位置復元処理",
+        "マイルストーン日程調整の特別処理（依存先の自動調整）",
+        "Editor権限のみドラッグ&ドロップ可能"
+      ],
+      "started_at": "2025-09-10T10:10:00Z",
+      "completed_at": "2025-09-10T13:10:00Z"
+    },
+    {
+      "id": "M6-07",
+      "title": "Frontend: 依存関係線表示機能",
+      "description": "依存関係の矢印線描画、SVGまたはCanvas活用、線の動的計算・描画",
+      "milestone": "M6",
+      "estimated_hours": 2.0,
+      "status": "completed",
+      "dependencies": ["M6-01", "M6-06"],
+      "files": [
+        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/components/gantt/DependencyLines.tsx",
+        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/utils/gantt-geometry.ts",
+        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/components/gantt/DependencyArrow.tsx"
+      ],
+      "acceptance_criteria": [
+        "FS（Finish-to-Start）依存関係の矢印線表示",
+        "先行タスク終了 → 後続タスク開始の視覚的接続",
+        "スクロール・リサイズ時の線の動的再計算",
+        "依存関係線のホバー・選択状態表示",
+        "複数依存関係の線重複回避アルゴリズム",
+        "パフォーマンス最適化（表示範囲外の線は非描画）"
+      ],
+      "started_at": "2025-09-10T08:03:00Z",
+      "completed_at": "2025-09-10T10:03:00Z"
+    },
     {
       "id": "M6-06",
       "title": "Frontend: Issue期間バー表示・基本描画",
