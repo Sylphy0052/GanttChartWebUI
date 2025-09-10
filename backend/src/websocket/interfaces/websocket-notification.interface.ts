@@ -21,6 +21,7 @@
  * comment_deleted: Comment削除時の通知
  * dependency:created: 依存関係作成時の通知
  * dependency:deleted: 依存関係削除時の通知
+ * schedule_adjustment: 日程調整実行時の通知
  */
 export type NotificationEvent = 
   | 'settings_changed'        // 休日設定変更
@@ -33,7 +34,8 @@ export type NotificationEvent =
   | 'comment_updated'         // Comment更新
   | 'comment_deleted'         // Comment削除
   | 'dependency:created'      // 依存関係作成
-  | 'dependency:deleted';     // 依存関係削除
+  | 'dependency:deleted'      // 依存関係削除
+  | 'schedule_adjustment';    // 日程調整実行
 
 /**
  * WebSocket通知データ構造
@@ -58,6 +60,10 @@ export interface WebSocketNotification {
     entityType?: 'issue' | 'comment' | 'dependency';
     entityId?: string;
     entity?: any; // Issue・Comment・Dependency詳細データ
+    // ガント・依存関係関連の追加フィールド
+    dependencyId?: string;
+    adjustedIssues?: any[];
+    scheduleAdjustmentResult?: any;
   };
 }
 
