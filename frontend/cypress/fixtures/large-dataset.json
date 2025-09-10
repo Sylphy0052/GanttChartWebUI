@@ -1,0 +1,12 @@
+{
+  "description": "Large dataset fixture for performance testing",
+  "taskCount": 100,
+  "dependencyCount": 80,
+  "tasks": [],
+  "dependencies": [],
+  "metadata": {
+    "generated": "2024-09-10T00:00:00Z",
+    "purpose": "performance_testing",
+    "expectedLoadTime": "< 5000ms"
+  }
+}

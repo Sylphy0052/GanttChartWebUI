@@ -9,9 +9,21 @@
     "comment_updated",
     "comment_deleted",
     "file_uploaded",
-    "file_deleted"
+    "file_deleted",
+    "dependency_created",
+    "dependency_deleted",
+    "dependency_updated",
+    "schedule_adjusted",
+    "gantt_updated",
+    "issues_reordered"
   ],
   "user_id": "test-user@example.com",
   "project_id": "test-project-123",
-  "timestamp": "2024-01-01T10:00:00Z"
+  "timestamp": "2024-01-01T10:00:00Z",
+  "gantt_features": {
+    "realtime_updates": true,
+    "dependency_notifications": true,
+    "schedule_adjustment_notifications": true,
+    "drag_drop_sync": true
+  }
 }

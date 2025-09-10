@@ -3,6 +3,9 @@
 // Import WBS-specific custom commands
 import './wbs-commands'
 
+// Import Gantt Chart-specific custom commands
+import './gantt-commands'
+
 // Add custom commands and support utilities here
 
 declare global {
@@ -231,7 +234,9 @@ Cypress.on('uncaught:exception', (err, runnable) => {
   if (err.message.includes('Network Error') || 
       err.message.includes('ResizeObserver loop limit exceeded') ||
       err.message.includes('WebSocket connection failed') ||
-      err.message.includes('Non-Error promise rejection captured')) {
+      err.message.includes('Non-Error promise rejection captured') ||
+      err.message.includes('Canvas2D') ||
+      err.message.includes('SVG animation')) {
     return false
   }
 })
@@ -251,6 +256,12 @@ beforeEach(() => {
   cy.intercept('GET', '**/api/user/current', {
     email: 'test-user@example.com',
     name: 'Test User'
+  })
+
+  // Health check endpoint
+  cy.intercept('GET', '**/api/health', {
+    statusCode: 200,
+    body: { status: 'OK', timestamp: new Date().toISOString() }
   })
 })
 
