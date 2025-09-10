@@ -5,10 +5,9 @@ import { useRouter, useParams } from 'next/navigation';
 import { Issue } from '@/types/issue';
 import { Project, ProjectRole } from '@/types/project';
 import { issuesApi, projectsApi, ApiError } from '@/lib/api';
-import { useWBSWebSocket } from '@/hooks/useWBSWebSocket';
+import { useGanttWebSocket } from '@/hooks/useGanttWebSocket';
 import GanttLayout from '@/components/gantt/GanttLayout';
-import NotificationHandler from '@/components/websocket/NotificationHandler';
-import { WebSocketNotification } from '@/lib/websocket';
+import GanttNotificationHandler from '@/components/gantt/GanttNotificationHandler';
 
 /**
  * ガント専用ページ
@@ -25,12 +24,17 @@ export default function GanttPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // WebSocket接続
-  const { isConnected: wsConnected } = useWBSWebSocket(projectId, (notification: WebSocketNotification) => {
-    // WebSocket通知でIssueリストを更新
-    if (notification.type === 'issue_updated' || notification.type === 'issue_created' || notification.type === 'issue_deleted') {
-      loadIssues();
-    }
+  // ガント専用のWebSocket接続
+  const { isConnected: wsConnected } = useGanttWebSocket({
+    projectId,
+    onIssuesUpdate: (updatedIssues: Issue[]) => {
+      console.log('Issues updated from WebSocket:', updatedIssues);
+      setIssues(updatedIssues);
+    },
+    onError: (errorMessage: string) => {
+      console.error('Gantt WebSocket error:', errorMessage);
+      setError(errorMessage);
+    },
   });
 
   // プロジェクト情報とIssues情報を取得
@@ -42,10 +46,10 @@ export default function GanttPage() {
       // プロジェクト情報取得
       const projectData = await projectsApi.getById(projectId);
       setProject(projectData);
-      setUserRole(projectData.user_role || 'viewer');
+      setUserRole(projectData.role || 'viewer');
 
       // Issues取得
-      const issuesData = await issuesApi.getByProject(projectId);
+      const issuesData = await issuesApi.getAll(projectId);
       setIssues(issuesData);
     } catch (error) {
       console.error('データ取得エラー:', error);
@@ -68,7 +72,7 @@ export default function GanttPage() {
   // Issues情報のみを再取得
   const loadIssues = useCallback(async () => {
     try {
-      const issuesData = await issuesApi.getByProject(projectId);
+      const issuesData = await issuesApi.getAll(projectId);
       setIssues(issuesData);
     } catch (error) {
       console.error('Issues取得エラー:', error);
@@ -116,6 +120,13 @@ export default function GanttPage() {
     setIssues(updatedIssues);
   }, []);
 
+  // ガントチャート更新
+  const handleGanttUpdate = useCallback(() => {
+    // ガントチャートの依存関係線やタスクバーを再描画
+    console.log('Gantt chart updated due to WebSocket notification');
+    // 必要に応じてガントチャートの状態を更新
+  }, []);
+
   // エラー表示
   if (error) {
     return (
@@ -156,8 +167,13 @@ export default function GanttPage() {
 
   return (
     <>
-      {/* WebSocket通知ハンドラー */}
-      <NotificationHandler />
+      {/* ガントチャート専用WebSocket通知ハンドラー */}
+      <GanttNotificationHandler
+        projectId={projectId}
+        onIssuesUpdate={handleIssuesUpdate}
+        onGanttUpdate={handleGanttUpdate}
+        onError={(errorMessage) => setError(errorMessage)}
+      />
 
       <div className="min-h-screen bg-gray-50">
         {/* ヘッダー */}

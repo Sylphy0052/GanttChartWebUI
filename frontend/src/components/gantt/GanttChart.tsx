@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useMemo, useEffect, useState, useCallback, useRef } from 'react';
+import { DndContext, DragOverlay, PointerSensor, useSensor, useSensors } from '@dnd-kit/core';
 import { Issue } from '../../types/issue';
 import {
   GanttChartProps,
@@ -17,11 +18,13 @@ import {
   generateGanttCSSVariables,
 } from '../../lib/gantt-config';
 import TaskBar from './TaskBar';
+import DraggableTaskBar from './DraggableTaskBar';
 import MilestoneMarker from './MilestoneMarker';
 import DependencyLines, { Dependency } from './DependencyLines';
+import { useGanttDragDrop } from '../../hooks/useGanttDragDrop';
 
 /**
- * 拡張ガントチャートProps（依存関係表示対応）
+ * 拡張ガントチャートProps（依存関係編集対応）
  */
 export interface ExtendedGanttChartProps extends GanttChartProps {
   dependencies?: Dependency[];
@@ -29,11 +32,20 @@ export interface ExtendedGanttChartProps extends GanttChartProps {
   onDependencyHover?: (dependency: Dependency | null) => void;
   selectedDependency?: string | null;
   projectId?: string;
+  enableDragDrop?: boolean; // ドラッグ&ドロップ機能の有効化
+  editorRole?: boolean; // Editor権限チェック
+  
+  // 依存関係編集用イベントハンドラー
+  onTaskBarRightClick?: (issue: Issue, event: React.MouseEvent) => void;
+  onDependencyLineRightClick?: (dependencyId: string, event: React.MouseEvent) => void;
+  onTaskBarClick?: (issue: Issue) => void;
+  dependencyCreationMode?: boolean;
+  selectedPredecessor?: Issue | null;
 }
 
 /**
- * 基本ガントチャートコンポーネント（依存関係線表示対応）
- * Issue期間バー表示・基本描画・FS依存関係矢印線表示機能を提供
+ * 基本ガントチャートコンポーネント（依存関係線表示対応 + ドラッグ&ドロップ対応 + 依存関係編集対応）
+ * Issue期間バー表示・基本描画・FS依存関係矢印線表示・ドラッグ&ドロップ日程調整・依存関係編集機能を提供
  */
 const GanttChart: React.FC<ExtendedGanttChartProps> = ({
   issues,
@@ -47,6 +59,13 @@ const GanttChart: React.FC<ExtendedGanttChartProps> = ({
   onDependencyHover,
   selectedDependency,
   projectId,
+  enableDragDrop = false,
+  editorRole = false,
+  onTaskBarRightClick,
+  onDependencyLineRightClick,
+  onTaskBarClick,
+  dependencyCreationMode = false,
+  selectedPredecessor,
   height = 400,
   className = '',
   loading = false,
@@ -56,9 +75,43 @@ const GanttChart: React.FC<ExtendedGanttChartProps> = ({
   const [warnings, setWarnings] = useState<string[]>([]);
   const ganttContainerRef = useRef<HTMLDivElement>(null);
 
+  // @dnd-kit sensors設定
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 8, // 8px移動してからドラッグ開始
+      },
+    })
+  );
+
   // 設定のマージ
   const ganttOptions = useMemo(() => mergeGanttOptions(options), [options]);
   const ganttDisplaySettings = useMemo(() => mergeDisplaySettings(displaySettings), [displaySettings]);
+
+  // ドラッグ&ドロップ機能（Editor権限且つ有効化時のみ）
+  const isDragDropEnabled = enableDragDrop && editorRole && !readOnly && projectId;
+  const {
+    dragState,
+    handleDragStart,
+    handleDragMove,
+    handleDragEnd,
+    validateConstraints,
+  } = useGanttDragDrop({
+    issues,
+    dependencies,
+    projectId: projectId || '',
+    onIssueUpdate: (issueId, updatedIssue) => {
+      if (onTaskChange) {
+        onTaskChange(issueId, updatedIssue);
+      }
+    },
+    onError: (error) => {
+      console.error('Drag & Drop Error:', error);
+      setWarnings(prev => [...prev, `ドラッグ&ドロップエラー: ${error.message}`]);
+    },
+    readOnly: !isDragDropEnabled,
+    pixelsPerDay: 14, // 1日 = 14px
+  });
 
   // Issueのソート
   const sortedIssues = useMemo(() => sortIssuesForGantt(issues), [issues]);
@@ -141,7 +194,26 @@ const GanttChart: React.FC<ExtendedGanttChartProps> = ({
     }
   }, [filteredIssues, onTaskSelect]);
 
-  // タスク変更ハンドラー（ドラッグ&ドロップ、リサイズ対応）
+  // タスクバークリックハンドラー（依存関係作成モード対応）
+  const handleTaskBarClickInternal = useCallback((issue: Issue, event: React.MouseEvent) => {
+    // 右クリック処理
+    if (event.button === 2) {
+      event.preventDefault();
+      onTaskBarRightClick?.(issue, event);
+      return;
+    }
+
+    // 左クリック処理
+    if (dependencyCreationMode) {
+      // 依存関係作成モード中のクリック
+      onTaskBarClick?.(issue);
+    } else {
+      // 通常のタスク選択
+      handleTaskSelect(issue.id);
+    }
+  }, [dependencyCreationMode, onTaskBarRightClick, onTaskBarClick, handleTaskSelect]);
+
+  // タスク変更ハンドラー（非ドラッグ操作用）
   const handleTaskChange = useCallback((task: GanttTask) => {
     if (readOnly || !onTaskChange) return;
 
@@ -172,6 +244,18 @@ const GanttChart: React.FC<ExtendedGanttChartProps> = ({
     
     return diffDays <= 1; // 1日以下はマイルストーン扱い
   }, []);
+
+  // 依存関係線の右クリックハンドラー
+  const handleDependencyClick = useCallback((dependency: Dependency, event?: React.MouseEvent) => {
+    if (event?.button === 2) {
+      // 右クリック
+      event.preventDefault();
+      onDependencyLineRightClick?.(dependency.id, event);
+    } else {
+      // 左クリック（選択）
+      onDependencySelect?.(dependency);
+    }
+  }, [onDependencyLineRightClick, onDependencySelect]);
 
   // ローディング表示
   if (loading) {
@@ -207,184 +291,249 @@ const GanttChart: React.FC<ExtendedGanttChartProps> = ({
   }
 
   return (
-    <div 
-      className={`gantt-chart-container relative ${className}`}
-      style={{ 
-        height: `${height}px`,
-        ...cssVariables 
-      }}
+    <DndContext
+      sensors={sensors}
+      onDragStart={handleDragStart}
+      onDragMove={handleDragMove}
+      onDragEnd={handleDragEnd}
     >
-      {/* 警告メッセージ */}
-      {warnings.length > 0 && (
-        <div className="mb-2">
-          <div className="bg-yellow-50 border border-yellow-200 rounded-md p-2">
-            <div className="flex">
-              <div className="text-yellow-400 mr-2">⚠️</div>
-              <div>
-                <p className="text-sm font-medium text-yellow-800">ガントチャート変換の警告</p>
-                <ul className="mt-1 text-xs text-yellow-700">
-                  {warnings.map((warning, index) => (
-                    <li key={index}>• {warning}</li>
-                  ))}
-                </ul>
+      <div 
+        className={`gantt-chart-container relative ${className}`}
+        style={{ 
+          height: `${height}px`,
+          ...cssVariables 
+        }}
+      >
+        {/* 依存関係作成モード表示 */}
+        {dependencyCreationMode && selectedPredecessor && (
+          <div className="absolute top-2 left-2 z-30 bg-blue-100 border border-blue-300 rounded-md px-3 py-1 text-sm">
+            <span className="text-blue-700">
+              依存関係作成中: <strong>{selectedPredecessor.title}</strong> → 後続タスクを選択
+            </span>
+          </div>
+        )}
+
+        {/* 警告メッセージ */}
+        {warnings.length > 0 && (
+          <div className="mb-2">
+            <div className="bg-yellow-50 border border-yellow-200 rounded-md p-2">
+              <div className="flex">
+                <div className="text-yellow-400 mr-2">⚠️</div>
+                <div>
+                  <p className="text-sm font-medium text-yellow-800">ガントチャート変換の警告</p>
+                  <ul className="mt-1 text-xs text-yellow-700">
+                    {warnings.map((warning, index) => (
+                      <li key={index}>• {warning}</li>
+                    ))}
+                  </ul>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* 期間バー表示ガントチャート */}
-      <div className="gantt-timeline bg-white border rounded-lg overflow-hidden">
-        {/* ヘッダー */}
-        <div className="bg-gray-50 p-3 border-b flex justify-between items-center">
-          <h3 className="text-sm font-medium text-gray-900">
-            ガントチャート ({filteredIssues.length} タスク)
-            {filteredDependencies.length > 0 && (
-              <span className="text-blue-600 ml-2">
-                依存関係: {filteredDependencies.length}
-              </span>
-            )}
-          </h3>
-          <div className="flex items-center space-x-2 text-xs text-gray-500">
-            <span>表示期間: {dateRange.start.toLocaleDateString()} - {dateRange.end.toLocaleDateString()}</span>
-            <span>|</span>
-            <span>表示モード: {ganttOptions.viewMode}</span>
-            <span>|</span>
-            <span>行高: {ganttOptions.rowHeight}px</span>
-            {ganttDisplaySettings.showDependencies && (
-              <>
-                <span>|</span>
-                <span className="text-blue-600">依存関係表示中</span>
-              </>
-            )}
-          </div>
-        </div>
-
-        {/* タスク一覧（期間バー表示） */}
-        <div 
-          ref={ganttContainerRef}
-          className="gantt-tasks-container relative" 
-          style={{ maxHeight: `${height - 120}px`, overflowY: 'auto', overflowX: 'auto' }}
-        >
-          {filteredIssues.map((issue, index) => {
-            const isSelected = selectedTask === issue.id;
-            const isTaskMilestone = isMilestone(issue);
-            
-            // 日付の準備
-            const startDate = issue.start_date ? new Date(issue.start_date) : new Date();
-            const endDate = issue.end_date ? new Date(issue.end_date) : new Date(startDate.getTime() + 24 * 60 * 60 * 1000);
-            
-            // タスクバー幅の計算
-            const taskWidth = calculateTaskWidth(startDate, endDate);
-
-            return (
-              <div
-                key={issue.id}
-                data-issue-id={issue.id}
-                className={`flex items-center border-b border-gray-100 hover:bg-gray-50 transition-colors ${
-                  isSelected ? 'bg-blue-50 border-l-4 border-blue-500' : ''
-                }`}
-                style={{ height: `${ganttOptions.rowHeight}px` }}
-              >
-                {/* 左側: タスク情報 */}
-                <div className="flex-shrink-0 w-80 px-4 border-r border-gray-200 flex items-center">
-                  {/* 階層インデント */}
-                  {ganttDisplaySettings.showHierarchy && issue.parent_id && (
-                    <div style={{ width: `${ganttDisplaySettings.indentSize}px` }} className="flex-shrink-0" />
-                  )}
-                  
-                  {/* タスクタイプアイコン */}
-                  <div className="mr-2 flex-shrink-0">
-                    {isTaskMilestone && <span className="text-red-500">◆</span>}
-                    {issue.children && issue.children.length > 0 && <span className="text-green-500">📁</span>}
-                    {!isTaskMilestone && (!issue.children || issue.children.length === 0) && <span className="text-blue-500">■</span>}
-                  </div>
-                  
-                  {/* タスク名 */}
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-gray-900 truncate" title={issue.title}>
-                      {issue.wbs_number && `${issue.wbs_number} `}{issue.title}
-                      {issue.is_blocked && <span className="text-red-500 ml-1">[BLOCKED]</span>}
-                    </p>
-                    <p className="text-xs text-gray-500 truncate">
-                      {issue.assignee && `担当: ${issue.assignee} | `}
-                      {startDate.toLocaleDateString()} - {endDate.toLocaleDateString()}
-                    </p>
-                  </div>
-                </div>
-
-                {/* 右側: 期間バー表示領域 */}
-                <div className="flex-1 px-4 py-2 relative">
-                  {isTaskMilestone ? (
-                    /* マイルストーン菱形表示 */
-                    <MilestoneMarker
-                      issue={issue}
-                      date={startDate}
-                      size={Math.min(ganttOptions.barHeight, 20)}
-                      onClick={() => handleTaskSelect(issue.id)}
-                      showLabel={false} // 左側にラベル表示済み
-                      readOnly={readOnly}
-                      className="milestone-marker"
-                    />
-                  ) : (
-                    /* タスク期間バー表示 */
-                    <TaskBar
-                      issue={issue}
-                      startDate={startDate}
-                      endDate={endDate}
-                      width={taskWidth}
-                      height={ganttOptions.barHeight}
-                      onClick={() => handleTaskSelect(issue.id)}
-                      showLabel={taskWidth > 100} // 幅が十分な場合のみラベル表示
-                      showProgress={ganttDisplaySettings.showProgress}
-                      readOnly={readOnly}
-                      className="task-bar"
-                    />
-                  )}
-                </div>
-              </div>
-            );
-          })}
-
-          {/* 依存関係線表示 */}
-          {ganttDisplaySettings.showDependencies && (
-            <DependencyLines
-              issues={filteredIssues}
-              dependencies={filteredDependencies}
-              containerRef={ganttContainerRef}
-              rowHeight={ganttOptions.rowHeight}
-              selectedDependency={selectedDependency}
-              onDependencySelect={onDependencySelect}
-              onDependencyHover={onDependencyHover}
-              disabled={readOnly}
-            />
-          )}
-        </div>
-
-        {/* フッター情報 */}
-        <div className="bg-gray-50 px-3 py-2 border-t">
-          <div className="flex justify-between items-center text-xs text-gray-500">
-            <span>
-              完了: {filteredIssues.filter(i => i.status === 'done').length} / 
-              進行中: {filteredIssues.filter(i => i.status === 'in_progress').length} / 
-              未開始: {filteredIssues.filter(i => i.status === 'open').length} /
-              ブロック: {filteredIssues.filter(i => i.is_blocked).length}
-            </span>
-            <span>
-              マイルストーン: {filteredIssues.filter(i => isMilestone(i)).length}
-            </span>
-            <span>
+        {/* 期間バー表示ガントチャート */}
+        <div className="gantt-timeline bg-white border rounded-lg overflow-hidden">
+          {/* ヘッダー */}
+          <div className="bg-gray-50 p-3 border-b flex justify-between items-center">
+            <h3 className="text-sm font-medium text-gray-900">
+              ガントチャート ({filteredIssues.length} タスク)
               {filteredDependencies.length > 0 && (
-                <>依存関係: {filteredDependencies.length} | </>
+                <span className="text-blue-600 ml-2">
+                  依存関係: {filteredDependencies.length}
+                </span>
               )}
-              {readOnly ? '読み取り専用' : 'クリックして選択・編集'}
-            </span>
+              {isDragDropEnabled && (
+                <span className="text-green-600 ml-2">
+                  ドラッグ&ドロップ有効
+                </span>
+              )}
+              {dependencyCreationMode && (
+                <span className="text-orange-600 ml-2">
+                  依存関係作成モード
+                </span>
+              )}
+            </h3>
+            <div className="flex items-center space-x-2 text-xs text-gray-500">
+              <span>表示期間: {dateRange.start.toLocaleDateString()} - {dateRange.end.toLocaleDateString()}</span>
+              <span>|</span>
+              <span>表示モード: {ganttOptions.viewMode}</span>
+              <span>|</span>
+              <span>行高: {ganttOptions.rowHeight}px</span>
+              {ganttDisplaySettings.showDependencies && (
+                <>
+                  <span>|</span>
+                  <span className="text-blue-600">依存関係表示中</span>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* タスク一覧（期間バー表示） */}
+          <div 
+            ref={ganttContainerRef}
+            className="gantt-tasks-container relative" 
+            style={{ maxHeight: `${height - 120}px`, overflowY: 'auto', overflowX: 'auto' }}
+          >
+            {filteredIssues.map((issue, index) => {
+              const isSelected = selectedTask === issue.id;
+              const isTaskMilestone = isMilestone(issue);
+              const isBeingDragged = dragState.draggedTask?.id === issue.id;
+              const constraintViolation = dragState.constraintViolations.get(issue.id);
+              const isPredecessor = selectedPredecessor?.id === issue.id;
+              const isValidSuccessor = dependencyCreationMode && selectedPredecessor?.id !== issue.id;
+              
+              // 日付の準備
+              const startDate = issue.start_date ? new Date(issue.start_date) : new Date();
+              const endDate = issue.end_date ? new Date(issue.end_date) : new Date(startDate.getTime() + 24 * 60 * 60 * 1000);
+              
+              // タスクバー幅の計算
+              const taskWidth = calculateTaskWidth(startDate, endDate);
+
+              return (
+                <div
+                  key={issue.id}
+                  data-issue-id={issue.id}
+                  className={`flex items-center border-b border-gray-100 hover:bg-gray-50 transition-colors ${
+                    isSelected ? 'bg-blue-50 border-l-4 border-blue-500' : ''
+                  } ${isBeingDragged ? 'bg-blue-100' : ''} ${
+                    isPredecessor ? 'bg-orange-50 border-l-4 border-orange-500' : ''
+                  } ${isValidSuccessor ? 'bg-green-50 cursor-pointer' : ''}`}
+                  style={{ height: `${ganttOptions.rowHeight}px` }}
+                >
+                  {/* 左側: タスク情報 */}
+                  <div className="flex-shrink-0 w-80 px-4 border-r border-gray-200 flex items-center">
+                    {/* 階層インデント */}
+                    {ganttDisplaySettings.showHierarchy && issue.parent_id && (
+                      <div style={{ width: `${ganttDisplaySettings.indentSize}px` }} className="flex-shrink-0" />
+                    )}
+                    
+                    {/* タスクタイプアイコン */}
+                    <div className="mr-2 flex-shrink-0">
+                      {isTaskMilestone && <span className="text-red-500">◆</span>}
+                      {issue.children && issue.children.length > 0 && <span className="text-green-500">📁</span>}
+                      {!isTaskMilestone && (!issue.children || issue.children.length === 0) && <span className="text-blue-500">■</span>}
+                      {isPredecessor && <span className="text-orange-500 ml-1">👈</span>}
+                    </div>
+                    
+                    {/* タスク名 */}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-gray-900 truncate" title={issue.title}>
+                        {issue.wbs_number && `${issue.wbs_number} `}{issue.title}
+                        {issue.is_blocked && <span className="text-red-500 ml-1">[BLOCKED]</span>}
+                      </p>
+                      <p className="text-xs text-gray-500 truncate">
+                        {issue.assignee && `担当: ${issue.assignee} | `}
+                        {startDate.toLocaleDateString()} - {endDate.toLocaleDateString()}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* 右側: 期間バー表示領域 */}
+                  <div className="flex-1 px-4 py-2 relative">
+                    {isTaskMilestone ? (
+                      /* マイルストーン菱形表示 */
+                      <MilestoneMarker
+                        issue={issue}
+                        date={startDate}
+                        size={Math.min(ganttOptions.barHeight, 20)}
+                        onClick={(e) => handleTaskBarClickInternal(issue, e)}
+                        showLabel={false} // 左側にラベル表示済み
+                        readOnly={readOnly}
+                        className="milestone-marker"
+                        onContextMenu={(e) => handleTaskBarClickInternal(issue, e)}
+                      />
+                    ) : (
+                      /* タスク期間バー表示 */
+                      isDragDropEnabled ? (
+                        <DraggableTaskBar
+                          issue={issue}
+                          startDate={startDate}
+                          endDate={endDate}
+                          width={taskWidth}
+                          height={ganttOptions.barHeight}
+                          onTaskSelect={(selectedIssue, e) => handleTaskBarClickInternal(selectedIssue, e)}
+                          showLabel={taskWidth > 100} // 幅が十分な場合のみラベル表示
+                          showProgress={ganttDisplaySettings.showProgress}
+                          readOnly={readOnly}
+                          disabled={issue.is_blocked}
+                          isDragging={isBeingDragged}
+                          isConstraintViolated={!!constraintViolation}
+                          errorMessage={constraintViolation}
+                          className="draggable-task-bar"
+                          onContextMenu={(e) => handleTaskBarClickInternal(issue, e)}
+                        />
+                      ) : (
+                        <TaskBar
+                          issue={issue}
+                          startDate={startDate}
+                          endDate={endDate}
+                          width={taskWidth}
+                          height={ganttOptions.barHeight}
+                          onClick={(e) => handleTaskBarClickInternal(issue, e)}
+                          showLabel={taskWidth > 100} // 幅が十分な場合のみラベル表示
+                          showProgress={ganttDisplaySettings.showProgress}
+                          readOnly={readOnly}
+                          className="task-bar"
+                          onContextMenu={(e) => handleTaskBarClickInternal(issue, e)}
+                        />
+                      )
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+
+            {/* 依存関係線表示 */}
+            {ganttDisplaySettings.showDependencies && (
+              <DependencyLines
+                issues={filteredIssues}
+                dependencies={filteredDependencies}
+                containerRef={ganttContainerRef as React.RefObject<HTMLElement>}
+                rowHeight={ganttOptions.rowHeight}
+                selectedDependency={selectedDependency}
+                onDependencySelect={handleDependencyClick}
+                onDependencyHover={onDependencyHover}
+                disabled={readOnly}
+                onDependencyRightClick={onDependencyLineRightClick}
+              />
+            )}
+          </div>
+
+          {/* フッター情報 */}
+          <div className="bg-gray-50 px-3 py-2 border-t">
+            <div className="flex justify-between items-center text-xs text-gray-500">
+              <span>
+                完了: {filteredIssues.filter(i => i.status === 'done').length} / 
+                進行中: {filteredIssues.filter(i => i.status === 'in_progress').length} / 
+                未開始: {filteredIssues.filter(i => i.status === 'open').length} /
+                ブロック: {filteredIssues.filter(i => i.is_blocked).length}
+              </span>
+              <span>
+                マイルストーン: {filteredIssues.filter(i => isMilestone(i)).length}
+              </span>
+              <span>
+                {filteredDependencies.length > 0 && (
+                  <>依存関係: {filteredDependencies.length} | </>
+                )}
+                {readOnly ? '読み取り専用' : isDragDropEnabled ? 'ドラッグ&ドロップで編集可能' : 'クリックして選択・編集'}
+                {dependencyCreationMode && ' | 依存関係作成モード'}
+              </span>
+            </div>
           </div>
         </div>
+
+        {/* ドラッグオーバーレイ */}
+        <DragOverlay>
+          {dragState.draggedTask && (
+            <div className="bg-blue-400 bg-opacity-80 border-2 border-blue-600 rounded-md p-2 text-white text-sm font-medium shadow-lg">
+              {dragState.draggedTask.title} を移動中...
+            </div>
+          )}
+        </DragOverlay>
       </div>
-    </div>
+    </DndContext>
   );
 };
 
 export default GanttChart;
-export type { ExtendedGanttChartProps };

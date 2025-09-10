@@ -3,18 +3,29 @@ import { io, Socket } from 'socket.io-client';
 export interface WebSocketNotification {
   event: 'settings_changed' | 'issue_created' | 'issue_updated' | 'issue_deleted' | 
          'comment_created' | 'comment_updated' | 'comment_deleted' |
-         'issues_reordered' | 'issue_hierarchy_changed';
+         'issues_reordered' | 'issue_hierarchy_changed' |
+         'dependency:created' | 'dependency:deleted' | 
+         'schedule_adjustment' | 'optimistic_lock_error';
   data: {
     message: string;
     timestamp: string;
     projectId?: string;
     requiresReauth?: boolean;
-    entityType?: 'issue' | 'comment';
+    entityType?: 'issue' | 'comment' | 'dependency';
     entityId?: string;
     entity?: any;
     // WBS関連の追加データ
     affectedIssues?: any[];
     wbsChangeType?: 'reorder' | 'hierarchy';
+    // ガント関連の追加データ
+    adjustedIssues?: any[];
+    dependencyId?: string;
+    scheduleAdjustmentResult?: any;
+    conflictInfo?: {
+      conflictedEntity: string;
+      conflictedVersion: number;
+      currentVersion: number;
+    };
   };
 }
 
