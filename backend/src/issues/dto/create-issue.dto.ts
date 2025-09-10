@@ -9,6 +9,7 @@ import { IsString, IsOptional, MaxLength, MinLength, IsDateString, IsEnum, IsNum
  * - description_md: オプショナル、最大10000文字
  * - assignee: オプショナル、文字列
  * - status: オプショナル、IssueStatus enum値
+ * - type: オプショナル、IssueType enum値（デフォルト: Task）
  * - start_date: オプショナル、ISO日付文字列
  * - end_date: オプショナル、ISO日付文字列
  * - progress_pct: オプショナル、0-100の整数
@@ -44,6 +45,12 @@ export class CreateIssueDto {
     message: 'ステータスは open, in_progress, done, blocked のいずれかを指定してください' 
   })
   status?: 'open' | 'in_progress' | 'done' | 'blocked';
+
+  @IsOptional()
+  @IsEnum(['Task', 'Milestone'], { 
+    message: 'タイプは Task, Milestone のいずれかを指定してください' 
+  })
+  type?: 'Task' | 'Milestone';
 
   @IsOptional()
   @IsDateString({}, { message: '開始日は有効な日付形式で入力してください' })

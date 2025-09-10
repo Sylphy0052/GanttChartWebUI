@@ -1,10 +1,171 @@
 {
   "phase": "implement",
-  "current_milestone": "M5",
+  "current_milestone": "M6",
   "current_task": null,
   "next_tasks": [
+    {
+      "id": "M6-07",
+      "title": "Frontend: 依存関係線表示機能",
+      "description": "依存関係の矢印線描画、SVGまたはCanvas活用、線の動的計算・描画",
+      "milestone": "M6",
+      "estimated_hours": 2.0,
+      "status": "pending",
+      "dependencies": ["M6-01", "M6-06"],
+      "files": [
+        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/components/gantt/DependencyLines.tsx",
+        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/utils/gantt-geometry.ts",
+        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/components/gantt/DependencyArrow.tsx"
+      ],
+      "acceptance_criteria": [
+        "FS（Finish-to-Start）依存関係の矢印線表示",
+        "先行タスク終了 → 後続タスク開始の視覚的接続",
+        "スクロール・リサイズ時の線の動的再計算",
+        "依存関係線のホバー・選択状態表示",
+        "複数依存関係の線重複回避アルゴリズム",
+        "パフォーマンス最適化（表示範囲外の線は非描画）"
+      ]
+    },
+    {
+      "id": "M6-08",
+      "title": "Frontend: ガントチャート上ドラッグ&ドロップ日程調整",
+      "description": "タスクバーのドラッグ&ドロップによる日程変更、依存関係制約チェック、Backend API連携",
+      "milestone": "M6", 
+      "estimated_hours": 3.0,
+      "status": "pending",
+      "dependencies": ["M6-06", "M6-07"],
+      "files": [
+        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/components/gantt/DraggableTaskBar.tsx",
+        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/hooks/useGanttDragDrop.ts",
+        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/api/gantt.ts",
+        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/utils/date-calculations.ts"
+      ],
+      "acceptance_criteria": [
+        "タスクバーの水平ドラッグによる日程変更",
+        "ドラッグ中の視覚的フィードバック（ゴーストバー・制約違反警告）",
+        "依存関係制約違反時の警告表示・操作ブロック",
+        "ドロップ時のBackend API呼び出し・Issue更新",
+        "エラー時の元位置復元処理",
+        "マイルストーン日程調整の特別処理（依存先の自動調整）",
+        "Editor権限のみドラッグ&ドロップ可能"
+      ]
+    },
+    {
+      "id": "M6-09",
+      "title": "Frontend: 依存関係作成・編集UI",
+      "description": "依存関係の作成・削除UI、モーダルまたはコンテキストメニュー、線の直接接続操作",
+      "milestone": "M6",
+      "estimated_hours": 2.0,
+      "status": "pending", 
+      "dependencies": ["M6-07"],
+      "files": [
+        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/components/gantt/DependencyEditor.tsx",
+        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/hooks/useDependencyManagement.ts",
+        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/components/gantt/DependencyContextMenu.tsx"
+      ],
+      "acceptance_criteria": [
+        "タスクバー右クリックによる依存関係作成メニュー",
+        "先行タスク選択→後続タスク選択のUIフロー",
+        "既存依存関係線の右クリック→削除オプション",
+        "依存関係作成・削除のBackend API連携",
+        "循環依存エラーの適切なユーザー通知",
+        "依存関係一覧表示・管理画面（オプション）",
+        "Editor権限による依存関係編集制限"
+      ]
+    },
+    {
+      "id": "M6-10",
+      "title": "Frontend: WebSocket通知対応（ガント機能）",
+      "description": "依存関係・日程変更のSocket.IO通知、ガントチャートのリアルタイム更新、競合状態処理",
+      "milestone": "M6",
+      "estimated_hours": 1.5,
+      "status": "pending",
+      "dependencies": ["M6-02", "M6-08"],
+      "files": [
+        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/hooks/useGanttWebSocket.ts",
+        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/components/gantt/GanttNotificationHandler.tsx",
+        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/backend/src/dependencies/dependencies.service.ts"
+      ],
+      "acceptance_criteria": [
+        "依存関係作成・削除のSocket.IO通知受信",
+        "Issue日程変更・依存関係調整のリアルタイム反映",
+        "受信通知によるガントチャートUI即座更新",
+        "競合状態（楽観的排他制御エラー）の適切な処理",
+        "通知データ構造定義（dependency, schedule_adjustment）",
+        "既存WebSocket通知システムとの統合"
+      ]
+    },
+    {
+      "id": "M6-11",
+      "title": "テスト: Backend Dependency機能単体テスト",
+      "description": "Dependency API・日程調整ロジックの単体・統合テスト、循環依存検証テスト",
+      "milestone": "M6",
+      "estimated_hours": 2.0,
+      "status": "pending",
+      "dependencies": ["M6-01", "M6-02"],
+      "files": [
+        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/backend/src/dependencies/dependencies.service.spec.ts",
+        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/backend/src/dependencies/utils/schedule-calculator.util.spec.ts",
+        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/backend/test/dependencies.e2e-spec.ts"
+      ],
+      "acceptance_criteria": [
+        "DependenciesService CRUD操作の単体テスト",
+        "循環依存検証アルゴリズムの境界値テスト", 
+        "日程自動調整ロジックのテストケース（休日・依存関係チェーン）",
+        "Dependencies API エンドポイントの統合テスト",
+        "権限テスト（Viewer/Editor）・エラーケーステスト",
+        "テストカバレッジ85%以上達成"
+      ]
+    },
+    {
+      "id": "M6-12",
+      "title": "テスト: Frontend ガント機能E2Eテスト",
+      "description": "ガントチャート表示・操作・依存関係管理のCypressテスト、統合動作検証",
+      "milestone": "M6", 
+      "estimated_hours": 2.5,
+      "status": "pending",
+      "dependencies": ["M6-08", "M6-09"],
+      "files": [
+        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/cypress/e2e/gantt-chart.cy.ts",
+        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/cypress/e2e/dependency-management.cy.ts",
+        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/cypress/support/gantt-commands.ts"
+      ],
+      "acceptance_criteria": [
+        "ガントチャート表示・WBS連動表示のテスト",
+        "タスクバーのドラッグ&ドロップ日程変更テスト",
+        "依存関係作成・削除・線表示のテスト",
+        "マイルストーン表示・操作のテスト",
+        "権限による操作制限のテスト（Viewer/Editor）",
+        "エラーハンドリング・制約違反警告のテスト",
+        "WebSocket通知によるリアルタイム更新のテスト"
+      ]
+    }
   ],
   "completed_tasks": [
+    {
+      "id": "M6-06",
+      "title": "Frontend: Issue期間バー表示・基本描画",
+      "description": "Issue期間のバー表示、マイルストーンの菱形表示、進捗率視覚化、ステータス色分け",
+      "milestone": "M6",
+      "estimated_hours": 2.5,
+      "status": "completed",
+      "dependencies": ["M6-05"],
+      "files": [
+        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/components/gantt/TaskBar.tsx",
+        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/components/gantt/MilestoneMarker.tsx",
+        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/components/gantt/ProgressBar.tsx",
+        "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/utils/gantt-colors.ts"
+      ],
+      "acceptance_criteria": [
+        "Issue期間（start_date, end_date）の横バー表示",
+        "Milestone型Issueの菱形マーカー表示",
+        "進捗率（progress_pct）の内部プログレスバー",
+        "ステータス別色分け（open, in_progress, done, blocked）",
+        "Issue名・期間の適切なラベル表示",
+        "バー高さ・マージンの調整（WBSツリー行高と同期）"
+      ],
+      "started_at": "2025-09-10T05:32:00Z",
+      "completed_at": "2025-09-10T08:02:00Z"
+    },
     {
       "id": "docker-base",
       "title": "Docker基盤構築",
@@ -642,6 +803,71 @@
       "acceptance_criteria": ["WBSツリー表示・展開折りたたみのテスト", "ドラッグ&ドロップ並び替えの動作テスト", "階層変更UIの操作テスト", "リアルタイム通知受信のテスト"],
       "started_at": "2025-09-08T23:46:00Z",
       "completed_at": "2025-09-09T00:15:00Z"
+    },
+    {
+      "id": "M6-01",
+      "title": "Backend: Dependency CRUD API実装",
+      "description": "DependencyモジュールとCRUD APIの実装、循環依存検証ロジック、既存Prismaスキーマの活用",
+      "milestone": "M6",
+      "estimated_hours": 2.0,
+      "status": "completed",
+      "dependencies": [],
+      "files": ["backend/src/dependencies/dependencies.controller.ts", "backend/src/dependencies/dependencies.service.ts", "backend/src/dependencies/dto/", "backend/src/dependencies/dependencies.module.ts"],
+      "acceptance_criteria": ["POST /dependencies - 依存関係作成（循環依存検証付き）", "GET /projects/:projectId/dependencies - プロジェクト内依存関係一覧", "DELETE /dependencies/:id - 依存関係削除", "4つの依存関係タイプ（FS/SS/FF/SF）対応", "楽観的排他制御によるバージョン管理"],
+      "started_at": "2025-09-10T00:00:00Z",
+      "completed_at": "2025-09-10T00:30:00Z"
+    },
+    {
+      "id": "M6-02",
+      "title": "Backend: 依存関係による日程自動調整ロジック",
+      "description": "FS依存関係に基づく自動日程調整アルゴリズム、GlobalSettings休日考慮、Critical Path計算",
+      "milestone": "M6",
+      "estimated_hours": 2.5,
+      "status": "completed",
+      "dependencies": ["M6-01"],
+      "files": ["/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/backend/src/dependencies/utils/schedule-calculator.util.ts", "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/backend/src/dependencies/dependencies.service.ts", "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/backend/src/dependencies/interfaces/schedule-adjustment.interface.ts"],
+      "acceptance_criteria": ["FS依存関係に基づく後続タスクの自動開始日調整", "GlobalSettings休日設定（weekend_off, holiday_dates）考慮", "依存関係チェーン全体の日程再計算機能", "Critical Path（クリティカルパス）識別・計算", "日程調整結果のバリデーション・制約違反検出", "調整不可能な場合の適切なエラーレスポンス"],
+      "started_at": "2025-09-10T00:31:00Z",
+      "completed_at": "2025-09-10T01:30:00Z"
+    },
+    {
+      "id": "M6-03",
+      "title": "Backend: Issue typeフィールド拡張（Milestone対応）",
+      "description": "Prismaスキーマ更新、IssueTypeエンティティ追加、マイグレーション実行、DTO更新",
+      "milestone": "M6",
+      "estimated_hours": 1.0,
+      "status": "completed",
+      "dependencies": [],
+      "files": ["/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/backend/prisma/schema.prisma", "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/backend/prisma/migrations/", "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/backend/src/issues/dto/issue-response.dto.ts"],
+      "acceptance_criteria": ["Issue.typeにTask/Milestoneの区別追加", "Milestone制約（duration=0, 終了日=開始日）", "既存データのMigration", "API ResponseでのMilestone識別"],
+      "started_at": "2025-09-10T01:31:00Z",
+      "completed_at": "2025-09-10T02:00:00Z"
+    },
+    {
+      "id": "M6-04",
+      "title": "Frontend: ガントチャートライブラリ選定・導入",
+      "description": "React用ガントライブラリ評価・選定・基本設定（dhtmlx-gantt, react-gantt-timeline, 自作Canvas等）",
+      "milestone": "M6",
+      "estimated_hours": 1.5,
+      "status": "completed",
+      "dependencies": [],
+      "files": ["/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/package.json", "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/components/gantt/GanttChart.tsx", "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/types/gantt.ts", "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/lib/gantt-config.ts"],
+      "acceptance_criteria": ["ライブラリ選定・ライセンス確認・インストール完了", "基本ガントチャート表示の動作確認", "TypeScript型定義の整備", "既存@dnd-kitとの互換性確認", "Issue期間データのガント表示形式変換"],
+      "started_at": "2025-09-10T02:00:00Z",
+      "completed_at": "2025-09-10T03:30:00Z"
+    },
+    {
+      "id": "M6-05",
+      "title": "Frontend: WBS-ガント統合レイアウト実装",
+      "description": "左側WBSツリー・右側ガントチャートの分割レイアウト、同期スクロール、リサイズ対応",
+      "milestone": "M6",
+      "estimated_hours": 2.0,
+      "status": "completed",
+      "dependencies": ["M6-04"],
+      "files": ["/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/components/gantt/GanttLayout.tsx", "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/hooks/useGanttSync.ts", "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/components/gantt/SplitPane.tsx", "/mnt/c/Users/kfuruhashi/projects/github/GanttChartWebUI/frontend/src/app/projects/[id]/gantt/page.tsx"],
+      "acceptance_criteria": ["左WBSツリー・右ガントチャートの水平分割表示", "分割境界のドラッグによるリサイズ機能", "垂直スクロールの同期（WBS ↔ ガント）", "既存WBSTreeViewコンポーネントの再利用", "レスポンシブデザイン（モバイル時の表示切り替え）"],
+      "started_at": "2025-09-10T03:31:00Z",
+      "completed_at": "2025-09-10T05:31:00Z"
     }
   ],
   "milestones": {
@@ -678,7 +904,7 @@
     "M6": {
       "name": "ガント機能",
       "description": "ガント表示・依存関係・マイルストーン",
-      "status": "pending"
+      "status": "in_progress"
     },
     "M7": {
       "name": "テスト・検証",
@@ -690,5 +916,5 @@
     "initial_render_ms_p95": 1500,
     "drag_latency_ms_p95": 100
   },
-  "updated_at": "2025-09-09T00:15:00Z"
+  "updated_at": "2025-09-10T00:00:00Z"
 }

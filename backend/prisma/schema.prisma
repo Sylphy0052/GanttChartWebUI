@@ -51,6 +51,7 @@ model Issue {
   description_md String?   @db.Text
   assignee       String?
   status         IssueStatus @default(open)
+  type           IssueType   @default(Task) // Task/Milestone区別
   start_date     DateTime? @db.Date
   end_date       DateTime? @db.Date
   progress_pct   Int       @default(0) // 進捗率 0-100
@@ -78,6 +79,7 @@ model Issue {
   @@index([project_id, is_deleted])
   @@index([parent_id])
   @@index([status])
+  @@index([type])
   @@index([start_date])
   @@index([end_date])
   @@index([assignee])
@@ -166,6 +168,11 @@ enum IssueStatus {
   in_progress
   done
   blocked
+}
+
+enum IssueType {
+  Task      // 通常のタスク
+  Milestone // マイルストーン（期間なし、終了日=開始日）
 }
 
 enum DependencyType {

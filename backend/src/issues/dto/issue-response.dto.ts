@@ -29,6 +29,9 @@ export class IssueResponseDto {
   status: 'open' | 'in_progress' | 'done' | 'blocked';
 
   @Expose()
+  type: 'Task' | 'Milestone';
+
+  @Expose()
   start_date?: Date;
 
   @Expose()

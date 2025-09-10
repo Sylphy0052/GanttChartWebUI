@@ -1,10 +1,10 @@
 /**
  * WebSocket通知システムのインターフェース定義
  * 
- * 設定変更・Issue・Comment変更時のリアルタイム通知を管理する型定義：
+ * 設定変更・Issue・Comment・Dependency変更時のリアルタイム通知を管理する型定義：
  * - 通知イベント種別の列挙
  * - 通知データ構造の標準化
- * - 受け入れ条件: 設定変更・Issue・Comment変更時のWebSocket通知配信
+ * - 受け入れ条件: 設定変更・Issue・Comment・Dependency変更時のWebSocket通知配信
  */
 
 /**
@@ -19,6 +19,8 @@
  * comment_created: Comment作成時の通知
  * comment_updated: Comment更新時の通知
  * comment_deleted: Comment削除時の通知
+ * dependency:created: 依存関係作成時の通知
+ * dependency:deleted: 依存関係削除時の通知
  */
 export type NotificationEvent = 
   | 'settings_changed'        // 休日設定変更
@@ -29,7 +31,9 @@ export type NotificationEvent =
   | 'issue_deleted'           // Issue削除
   | 'comment_created'         // Comment作成
   | 'comment_updated'         // Comment更新
-  | 'comment_deleted';        // Comment削除
+  | 'comment_deleted'         // Comment削除
+  | 'dependency:created'      // 依存関係作成
+  | 'dependency:deleted';     // 依存関係削除
 
 /**
  * WebSocket通知データ構造
@@ -40,7 +44,7 @@ export type NotificationEvent =
  * - timestamp: 通知発生時刻（ISO文字列）
  * - projectId: プロジェクト特定通知用（オプション）
  * - requiresReauth: 再認証要求フラグ（オプション）
- * - entityType: エンティティの種別（Issue・Comment等）
+ * - entityType: エンティティの種別（Issue・Comment・Dependency等）
  * - entityId: エンティティのID
  * - entity: エンティティの詳細データ
  */
@@ -51,9 +55,9 @@ export interface WebSocketNotification {
     timestamp: string;
     projectId?: string;
     requiresReauth?: boolean;
-    entityType?: 'issue' | 'comment';
+    entityType?: 'issue' | 'comment' | 'dependency';
     entityId?: string;
-    entity?: any; // Issue・Comment詳細データ
+    entity?: any; // Issue・Comment・Dependency詳細データ
   };
 }
 
@@ -114,4 +118,20 @@ export interface CommentNotificationData {
     project_id: string;
   };
   author: string;
+}
+
+/**
+ * Dependency通知データ構造
+ */
+export interface DependencyNotificationData {
+  action: 'create' | 'delete';
+  dependency: {
+    id: string;
+    project_id: string;
+    predecessor_issue_id: string;
+    successor_issue_id: string;
+    type: 'FS';
+    predecessor?: { id: string; title: string };
+    successor?: { id: string; title: string };
+  };
 }

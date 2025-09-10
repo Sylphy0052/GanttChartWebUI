@@ -1,18 +1,19 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import { Issue, IssueFilters as IssueFiltersType } from '@/types/issue';
-import { ProjectRole } from '@/types/project';
+import { Project, ProjectRole } from '@/types/project';
 import { issuesApi, ApiError } from '@/lib/api';
 import IssueList from '@/components/issues/IssueList';
 import DraggableWBSTree from '@/components/issues/DraggableWBSTree';
+import GanttChart from '@/components/gantt/GanttChart';
 import IssueFilters from '@/components/issues/IssueFilters';
 import { useWBSWebSocket } from '@/hooks/useWBSWebSocket';
 import NotificationHandler from '@/components/websocket/NotificationHandler';
 import { WebSocketNotification } from '@/lib/websocket';
 
-type ViewMode = 'list' | 'wbs';
+type ViewMode = 'list' | 'wbs' | 'gantt';
 
 export default function IssuesPage() {
   const router = useRouter();
@@ -20,31 +21,55 @@ export default function IssuesPage() {
   const projectId = params.id as string;
 
   const [issues, setIssues] = useState<Issue[]>([]);
+  const [userRole, setUserRole] = useState<ProjectRole>('viewer');
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('wbs'); // デフォルトでWBSビューを使用
+  const [selectedIssue, setSelectedIssue] = useState<Issue | null>(null);
   const [filters, setFilters] = useState<IssueFiltersType>({
     sortBy: 'created_at',
     sortOrder: 'desc',
-    status: undefined,
-    assignee: undefined,
-    searchTerm: undefined,
+    status: 'all',
+    assignee: 'all',
+    searchTerm: '',
   });
 
-  // プロジェクト権限（実際の実装では認証情報から取得）
-  const [userRole] = useState<ProjectRole>('editor');
+  // WebSocket接続
+  const { isConnected: wsConnected } = useWBSWebSocket(projectId, (notification: WebSocketNotification) => {
+    // WebSocket通知を受信したときの処理
+    console.log('WebSocket notification received:', notification);
+    
+    // データが変更された場合は一覧を更新
+    if (notification.type === 'issue_updated' || 
+        notification.type === 'issue_created' || 
+        notification.type === 'issue_deleted') {
+      loadIssues();
+    }
+  });
 
   // Issues一覧取得
-  const fetchIssues = useCallback(async () => {
+  const loadIssues = useCallback(async () => {
     try {
       setIsLoading(true);
       setError(null);
-      const data = await issuesApi.getAll(projectId);
-      setIssues(data);
+      
+      const data = await issuesApi.getByProject(projectId);
+      setIssues(data.issues || data); // APIレスポンス形式に柔軟に対応
+
+      // user_roleも一緒に取得される場合
+      if (data.user_role) {
+        setUserRole(data.user_role);
+      }
     } catch (error) {
       console.error('Issues取得エラー:', error);
       if (error instanceof ApiError) {
-        setError(`Issues取得に失敗しました: ${error.message}`);
+        if (error.status === 404) {
+          setError('プロジェクトが見つかりません');
+        } else if (error.status === 403) {
+          setError('このプロジェクトにアクセスする権限がありません');
+        } else {
+          setError(`Issues取得に失敗しました: ${error.message}`);
+        }
       } else {
         setError('Issues取得に失敗しました');
       }
@@ -55,175 +80,229 @@ export default function IssuesPage() {
 
   // 初期データ取得
   useEffect(() => {
-    fetchIssues();
-  }, [fetchIssues]);
+    loadIssues();
+  }, [loadIssues]);
 
-  // WebSocket通知によるIssues更新のハンドリング
-  const handleIssuesUpdate = useCallback((updatedIssues: Issue[]) => {
-    console.log('Updating issues from WebSocket:', updatedIssues.length);
-    setIssues(updatedIssues);
-  }, []);
+  // フィルター変更
+  const handleFiltersChange = (newFilters: IssueFiltersType) => {
+    setFilters(newFilters);
+  };
 
-  // WebSocket通知によるエラーハンドリング
-  const handleWebSocketError = useCallback((error: string) => {
-    console.error('WebSocket error:', error);
-    setError(error);
-  }, []);
-
-  // WBS関連のWebSocket通知処理
-  const handleWBSChange = useCallback((notification: WebSocketNotification) => {
-    console.log('WBS change notification received:', notification);
-    
-    // 通知にIssueデータが含まれている場合はそれを使用
-    if (notification.data.affectedIssues) {
-      handleIssuesUpdate(notification.data.affectedIssues);
-    }
-    // データがない場合は全体再取得（useWBSWebSocketで処理される）
-  }, [handleIssuesUpdate]);
-
-  // WebSocket接続設定
-  const { isConnected } = useWBSWebSocket({
-    projectId,
-    onIssuesUpdate: handleIssuesUpdate,
-    onError: handleWebSocketError,
-  });
-
-  // ドラッグ&ドロップ後のIssues更新コールバック
-  const handleIssuesUpdateFromDrop = useCallback((updatedIssues: Issue[]) => {
-    setIssues(updatedIssues);
-  }, []);
-
-  // Issue詳細画面への遷移
+  // Issue詳細画面へのナビゲーション
   const handleIssueClick = (issue: Issue) => {
     router.push(`/projects/${projectId}/issues/${issue.id}`);
   };
 
-  // 新規Issue作成
+  // WBSツリーからのIssues更新ハンドラー（ドラッグ&ドロップ）
+  const handleIssuesUpdateFromDrop = useCallback((updatedIssues: Issue[]) => {
+    setIssues(updatedIssues);
+  }, []);
+
+  // Issue作成画面へのナビゲーション
   const handleCreateIssue = () => {
     router.push(`/projects/${projectId}/issues/create`);
   };
+
+  // ガント統合ページへのナビゲーション
+  const handleGanttLayoutPage = () => {
+    router.push(`/projects/${projectId}/gantt`);
+  };
+
+  // ガントチャートからのIssue選択
+  const handleGanttTaskSelect = useCallback((issue: Issue | null) => {
+    setSelectedIssue(issue);
+  }, []);
+
+  // ガントチャートからのIssue変更
+  const handleGanttTaskChange = useCallback(async (issueId: string, changes: Partial<Issue>) => {
+    try {
+      // 楽観ロック用にversionを取得
+      const currentIssue = issues.find(i => i.id === issueId);
+      if (!currentIssue) return;
+
+      // API呼び出し
+      const updatedIssue = await issuesApi.update(issueId, {
+        ...changes,
+        version: currentIssue.version, // 楽観ロック
+      });
+
+      // ローカル状態更新
+      setIssues(prev => prev.map(i => i.id === issueId ? updatedIssue : i));
+      
+    } catch (error) {
+      console.error('Issue更新エラー:', error);
+      if (error instanceof ApiError) {
+        setError(`Issue更新に失敗しました: ${error.message}`);
+      } else {
+        setError('Issue更新に失敗しました');
+      }
+    }
+  }, [issues]);
 
   // フィルター適用
   const applyFilters = (issues: Issue[]): Issue[] => {
     let filtered = [...issues];
 
-    // 検索語句でフィルター
-    if (filters.searchTerm) {
-      const term = filters.searchTerm.toLowerCase();
-      filtered = filtered.filter(issue => 
-        issue.title.toLowerCase().includes(term) ||
-        (issue.description_md && issue.description_md.toLowerCase().includes(term))
+    // ステータスフィルター
+    if (filters.status !== 'all') {
+      filtered = filtered.filter(issue => issue.status === filters.status);
+    }
+
+    // 担当者フィルター
+    if (filters.assignee !== 'all') {
+      filtered = filtered.filter(issue => issue.assignee === filters.assignee);
+    }
+
+    // 検索フィルター
+    if (filters.searchTerm.trim()) {
+      const searchTerm = filters.searchTerm.toLowerCase();
+      filtered = filtered.filter(issue =>
+        issue.title.toLowerCase().includes(searchTerm) ||
+        (issue.description_md && issue.description_md.toLowerCase().includes(searchTerm)) ||
+        (issue.assignee && issue.assignee.toLowerCase().includes(searchTerm)) ||
+        (issue.wbs_number && issue.wbs_number.toLowerCase().includes(searchTerm))
       );
     }
 
-    // ステータスでフィルター（複数選択対応）
-    if (filters.status && filters.status.length > 0) {
-      filtered = filtered.filter(issue => filters.status!.includes(issue.status));
-    }
+    // ソート
+    filtered.sort((a, b) => {
+      let aValue: any;
+      let bValue: any;
 
-    // 担当者でフィルター（前方一致）
-    if (filters.assignee) {
-      const assigneeTerm = filters.assignee.toLowerCase();
-      filtered = filtered.filter(issue => 
-        issue.assignee && issue.assignee.toLowerCase().startsWith(assigneeTerm)
-      );
-    }
+      switch (filters.sortBy) {
+        case 'title':
+          aValue = a.title;
+          bValue = b.title;
+          break;
+        case 'status':
+          aValue = a.status;
+          bValue = b.status;
+          break;
+        case 'assignee':
+          aValue = a.assignee || '';
+          bValue = b.assignee || '';
+          break;
+        case 'start_date':
+          aValue = a.start_date ? new Date(a.start_date).getTime() : 0;
+          bValue = b.start_date ? new Date(b.start_date).getTime() : 0;
+          break;
+        case 'end_date':
+          aValue = a.end_date ? new Date(a.end_date).getTime() : 0;
+          bValue = b.end_date ? new Date(b.end_date).getTime() : 0;
+          break;
+        case 'progress_pct':
+          aValue = a.progress_pct;
+          bValue = b.progress_pct;
+          break;
+        case 'created_at':
+        default:
+          aValue = new Date(a.created_at).getTime();
+          bValue = new Date(b.created_at).getTime();
+          break;
+      }
+
+      if (filters.sortOrder === 'asc') {
+        return aValue > bValue ? 1 : -1;
+      } else {
+        return aValue < bValue ? 1 : -1;
+      }
+    });
 
     return filtered;
   };
 
-  // ソート適用
-  const applySorting = (issues: Issue[]): Issue[] => {
-    const sorted = [...issues];
-    
-    switch (filters.sortBy) {
-      case 'title':
-        sorted.sort((a, b) => a.title.localeCompare(b.title));
-        break;
-      case 'status':
-        sorted.sort((a, b) => a.status.localeCompare(b.status));
-        break;
-      case 'assignee':
-        sorted.sort((a, b) => (a.assignee || '').localeCompare(b.assignee || ''));
-        break;
-      case 'start_date':
-        sorted.sort((a, b) => {
-          const dateA = a.start_date ? new Date(a.start_date).getTime() : 0;
-          const dateB = b.start_date ? new Date(b.start_date).getTime() : 0;
-          return dateA - dateB;
-        });
-        break;
-      case 'end_date':
-        sorted.sort((a, b) => {
-          const dateA = a.end_date ? new Date(a.end_date).getTime() : 0;
-          const dateB = b.end_date ? new Date(b.end_date).getTime() : 0;
-          return dateA - dateB;
-        });
-        break;
-      case 'created_at':
-      default:
-        sorted.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-        break;
-    }
+  const filteredIssues = applyFilters(issues);
 
-    return filters.sortOrder === 'desc' ? sorted.reverse() : sorted;
-  };
-
-  // フィルターとソートを適用したIssues
-  const filteredIssues = applySorting(applyFilters(issues));
+  // エラー状態
+  if (error) {
+    return (
+      <>
+        <NotificationHandler />
+        <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+          <div className="max-w-md w-full bg-white shadow-lg rounded-lg p-6">
+            <div className="flex items-center mb-4">
+              <div className="flex-shrink-0">
+                <svg className="h-6 w-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+              </div>
+              <div className="ml-3">
+                <h3 className="text-lg font-medium text-gray-900">エラー</h3>
+                <div className="mt-2 text-sm text-gray-500">
+                  {error}
+                </div>
+              </div>
+            </div>
+            <div className="flex justify-end space-x-3">
+              <button
+                onClick={() => router.back()}
+                className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                戻る
+              </button>
+              <button
+                onClick={() => window.location.reload()}
+                className="px-4 py-2 bg-blue-600 text-white rounded-md text-sm font-medium hover:bg-blue-700"
+              >
+                再試行
+              </button>
+            </div>
+          </div>
+        </div>
+      </>
+    );
+  }
 
   return (
     <>
-      {/* WebSocket通知ハンドラー */}
-      <NotificationHandler
-        projectId={projectId}
-        onWBSChange={handleWBSChange}
-        showToast={true}
-      />
-
+      <NotificationHandler />
+      
       <div className="min-h-screen bg-gray-50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-          {/* ブレッドクラム */}
-          <nav className="mb-6" aria-label="Breadcrumb">
-            <ol className="flex items-center space-x-2 text-sm">
-              <li>
+        {/* ヘッダー */}
+        <div className="bg-white border-b border-gray-200">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div className="flex items-center justify-between h-16">
+              <div className="flex items-center">
                 <button
                   onClick={() => router.push('/projects')}
-                  className="text-gray-500 hover:text-gray-700 hover:underline"
+                  className="flex items-center text-gray-600 hover:text-gray-900 mr-4"
                 >
-                  プロジェクト一覧
+                  <svg className="w-5 h-5 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7" />
+                  </svg>
+                  プロジェクト一覧に戻る
                 </button>
-              </li>
-              <li>
-                <svg className="w-4 h-4 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M7.293 14.707a1 1 0 010-1.414L10.586 10 7.293 6.707a1 1 0 011.414-1.414l4 4a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0z" clipRule="evenodd" />
-                </svg>
-              </li>
-              <li>
-                <span className="text-gray-900 font-medium">Issues</span>
-              </li>
-            </ol>
-          </nav>
-
-          {/* ヘッダー */}
-          <div className="mb-8">
-            <div className="flex items-center justify-between">
-              <div>
-                <h1 className="text-3xl font-bold text-gray-900">Issues</h1>
-                <p className="mt-2 text-gray-600">
-                  プロジェクトのタスクとIssueを管理します
-                </p>
-                {/* WebSocket接続状態表示 */}
-                <div className="mt-2 flex items-center space-x-2">
-                  <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
+                <h1 className="text-xl font-semibold text-gray-900">Issues</h1>
+              </div>
+              
+              {/* 接続状態とプロジェクト情報 */}
+              <div className="flex items-center space-x-4">
+                <div className="flex items-center space-x-2">
+                  <div className={`h-2 w-2 rounded-full ${wsConnected ? 'bg-green-400' : 'bg-red-400'}`}></div>
                   <span className="text-xs text-gray-500">
-                    リアルタイム更新: {isConnected ? '有効' : '無効'}
+                    {wsConnected ? 'リアルタイム同期中' : '接続中...'}
                   </span>
                 </div>
               </div>
-              
+            </div>
+          </div>
+        </div>
+
+        {/* メインコンテンツ */}
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+          {/* フィルター・ビュー切り替え・操作ボタン */}
+          <div className="mb-6 space-y-4">
+            {/* フィルター */}
+            <IssueFilters
+              filters={filters}
+              onChange={handleFiltersChange}
+              availableAssignees={[...new Set(issues.map(issue => issue.assignee).filter(Boolean))]}
+            />
+            
+            {/* ビュー切り替えと操作ボタン */}
+            <div className="flex items-center justify-between">
+              {/* ビュー切り替え */}
               <div className="flex items-center space-x-4">
-                {/* ビューモード切り替え */}
                 <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-1 flex">
                   <button
                     onClick={() => setViewMode('wbs')}
@@ -234,6 +313,16 @@ export default function IssuesPage() {
                     }`}
                   >
                     WBSツリー
+                  </button>
+                  <button
+                    onClick={() => setViewMode('gantt')}
+                    className={`px-3 py-2 text-sm font-medium rounded-md transition-colors ${
+                      viewMode === 'gantt'
+                        ? 'bg-blue-600 text-white'
+                        : 'text-gray-500 hover:text-gray-700'
+                    }`}
+                  >
+                    ガント
                   </button>
                   <button
                     onClick={() => setViewMode('list')}
@@ -247,47 +336,26 @@ export default function IssuesPage() {
                   </button>
                 </div>
 
-                {userRole === 'editor' && (
-                  <button
-                    onClick={handleCreateIssue}
-                    className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors flex items-center space-x-2"
-                  >
-                    <svg
-                      className="w-5 h-5"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M12 4v16m8-8H4"
-                      />
-                    </svg>
-                    <span>新規作成</span>
-                  </button>
-                )}
+                {/* ガント統合ページへのリンク */}
+                <button
+                  onClick={handleGanttLayoutPage}
+                  className="bg-green-600 text-white px-3 py-2 rounded-md text-sm font-medium hover:bg-green-700 transition-colors flex items-center space-x-2"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" 
+                          d="M4 6h16M4 12h16M4 18h7" />
+                  </svg>
+                  <span>ガント統合レイアウト</span>
+                </button>
               </div>
-            </div>
-          </div>
 
-          {/* フィルター */}
-          <div className="mb-6">
-            <IssueFilters
-              filters={filters}
-              onFiltersChange={setFilters}
-              projectId={projectId}
-            />
-          </div>
-
-          {/* エラー表示 */}
-          {error && (
-            <div className="mb-6">
-              <div className="bg-red-50 border border-red-200 rounded-md p-4">
-                <div className="flex items-center">
+              {userRole === 'editor' && (
+                <button
+                  onClick={handleCreateIssue}
+                  className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors flex items-center space-x-2"
+                >
                   <svg
-                    className="w-5 h-5 text-red-400 mr-3"
+                    className="w-5 h-5"
                     fill="none"
                     stroke="currentColor"
                     viewBox="0 0 24 24"
@@ -295,98 +363,156 @@ export default function IssuesPage() {
                     <path
                       strokeLinecap="round"
                       strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                      strokeWidth="2"
+                      d="M12 4v16m8-8H4"
                     />
                   </svg>
-                  <div className="flex-1">
-                    <p className="text-red-700">{error}</p>
-                    <button
-                      onClick={fetchIssues}
-                      className="mt-2 text-sm text-red-600 hover:text-red-800 underline"
-                    >
-                      再試行
-                    </button>
-                  </div>
-                </div>
-              </div>
+                  <span>新規Issue作成</span>
+                </button>
+              )}
             </div>
-          )}
 
-          {/* ローディング表示 */}
-          {isLoading && (
-            <div className="flex justify-center items-center py-12">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-              <span className="ml-3 text-gray-600">読み込み中...</span>
+            {/* 統計情報 */}
+            <div className="text-sm text-gray-600 flex items-center space-x-6">
+              <span>全{issues.length}件</span>
+              <span>表示中{filteredIssues.length}件</span>
+              {filteredIssues.length !== issues.length && (
+                <span className="text-blue-600">フィルタ適用中</span>
+              )}
+              {viewMode === 'gantt' && filteredIssues.some(issue => !issue.start_date || !issue.end_date) && (
+                <span className="text-yellow-600">
+                  ⚠ 開始日・終了日未設定のIssueがあります
+                </span>
+              )}
             </div>
-          )}
+          </div>
 
           {/* Issues表示 */}
           {!isLoading && (
             <div className="bg-white rounded-lg shadow-sm">
-              {viewMode === 'wbs' ? (
+              {viewMode === 'wbs' && (
                 <DraggableWBSTree
                   projectId={projectId}
                   issues={filteredIssues}
-                  onIssueClick={handleIssueClick}
+                  isLoading={isLoading}
                   onIssuesUpdate={handleIssuesUpdateFromDrop}
-                  userRole={userRole}
-                />
-              ) : (
-                <IssueList
-                  issues={filteredIssues}
-                  onIssueClick={handleIssueClick}
                   userRole={userRole}
                 />
               )}
 
-              {/* 空のIssues表示 */}
-              {filteredIssues.length === 0 && !isLoading && (
-                <div className="text-center py-12">
-                  <svg
-                    className="mx-auto h-12 w-12 text-gray-400"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"
-                    />
-                  </svg>
-                  <h3 className="mt-2 text-sm font-medium text-gray-900">
-                    Issueが見つかりません
-                  </h3>
-                  <p className="mt-1 text-sm text-gray-500">
-                    新しいIssueを作成するか、フィルター条件を変更してください
-                  </p>
-                  {userRole === 'editor' && (
-                    <div className="mt-6">
-                      <button
-                        onClick={handleCreateIssue}
-                        className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700"
-                      >
-                        <svg
-                          className="-ml-1 mr-2 h-5 w-5"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
+              {viewMode === 'gantt' && (
+                <div className="p-6">
+                  <div className="mb-4 flex items-center justify-between">
+                    <h2 className="text-lg font-medium text-gray-900">ガントチャート</h2>
+                    {selectedIssue && (
+                      <div className="text-sm text-gray-600">
+                        選択中: <span className="font-medium">{selectedIssue.title}</span>
+                        <button
+                          onClick={() => handleIssueClick(selectedIssue)}
+                          className="ml-2 text-blue-600 hover:text-blue-800 underline"
                         >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M12 4v16m8-8H4"
-                          />
-                        </svg>
-                        新規作成
-                      </button>
-                    </div>
-                  )}
+                          詳細を見る
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  
+                  <GanttChart
+                    issues={filteredIssues}
+                    onTaskChange={handleGanttTaskChange}
+                    onTaskSelect={handleGanttTaskSelect}
+                    height={500}
+                    readOnly={userRole !== 'editor'}
+                    loading={isLoading}
+                    options={{
+                      viewMode: 'Week',
+                      locale: 'ja-JP',
+                      allowDrag: userRole === 'editor',
+                      allowResize: userRole === 'editor',
+                      allowProgressChange: userRole === 'editor',
+                    }}
+                    displaySettings={{
+                      showHierarchy: true,
+                      showProgress: true,
+                      showDependencies: true,
+                      timeScale: 'day',
+                    }}
+                  />
                 </div>
               )}
+
+              {viewMode === 'list' && (
+                <IssueList
+                  issues={filteredIssues}
+                  onIssueClick={handleIssueClick}
+                />
+              )}
+            </div>
+          )}
+
+          {/* ローディング */}
+          {isLoading && (
+            <div className="bg-white rounded-lg shadow-sm p-12 text-center">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+              <p className="mt-4 text-gray-500">読み込み中...</p>
+            </div>
+          )}
+
+          {/* 空の状態 */}
+          {!isLoading && filteredIssues.length === 0 && issues.length === 0 && (
+            <div className="bg-white rounded-lg shadow-sm p-12 text-center">
+              <div className="text-gray-400 mb-4">
+                <svg
+                  className="mx-auto h-12 w-12"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 48 48"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M9 5H7a2 2 0 00-2 2v6a2 2 0 002 2h2m0-8H5a2 2 0 00-2 2v6a2 2 0 002 2h2m0-8v8m0-8h2m-2 8h2m-2 0v4a2 2 0 002 2h2a2 2 0 002-2v-4m0 0V9a2 2 0 00-2-2H7a2 2 0 00-2 2v4a2 2 0 002 2h2"
+                  />
+                </svg>
+              </div>
+              <h3 className="text-lg font-medium text-gray-900 mb-2">Issueがありません</h3>
+              <p className="text-gray-500 mb-6">
+                最初のIssueを作成してプロジェクトを始めましょう。
+              </p>
+              {userRole === 'editor' && (
+                <button
+                  onClick={handleCreateIssue}
+                  className="bg-blue-600 text-white px-6 py-3 rounded-md hover:bg-blue-700 transition-colors"
+                >
+                  最初のIssue作成
+                </button>
+              )}
+            </div>
+          )}
+
+          {/* フィルター結果が空の状態 */}
+          {!isLoading && filteredIssues.length === 0 && issues.length > 0 && (
+            <div className="bg-white rounded-lg shadow-sm p-12 text-center">
+              <div className="text-gray-400 mb-4">
+                <svg
+                  className="mx-auto h-12 w-12"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 48 48"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
+                  />
+                </svg>
+              </div>
+              <h3 className="text-lg font-medium text-gray-900 mb-2">該当するIssueがありません</h3>
+              <p className="text-gray-500">
+                フィルター条件を変更してもう一度お試しください。
+              </p>
             </div>
           )}
         </div>
