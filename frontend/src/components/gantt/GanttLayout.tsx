@@ -5,6 +5,8 @@ import { Issue } from '@/types/issue';
 import { ProjectRole } from '@/types/project';
 import DraggableWBSTree from '@/components/issues/DraggableWBSTree';
 import GanttChart, { ExtendedGanttChartProps } from './GanttChart';
+import DependencyEditor from './DependencyEditor';
+import GanttNotificationHandler from './GanttNotificationHandler';
 import { Dependency } from './DependencyLines';
 
 interface GanttLayoutProps {
@@ -18,7 +20,7 @@ interface GanttLayoutProps {
 }
 
 /**
- * WBS-ガント統合レイアウトコンポーネント（依存関係表示対応）
+ * WBS-ガント統合レイアウトコンポーネント（WebSocket通知対応）
  * 左側WBSツリー・右側ガントチャート（依存関係矢印線付き）の水平分割表示を提供
  */
 const GanttLayout: React.FC<GanttLayoutProps> = ({
@@ -110,6 +112,46 @@ const GanttLayout: React.FC<GanttLayoutProps> = ({
     // 現在は特に処理なし
   }, []);
 
+  // 依存関係作成成功時のハンドラー（ローカル＋WebSocket）
+  const handleDependencyCreated = useCallback((newDependency: Dependency) => {
+    setDependencies(prev => [...prev, newDependency]);
+    console.log('依存関係が作成されました:', newDependency);
+  }, []);
+
+  // 依存関係削除成功時のハンドラー（ローカル＋WebSocket）
+  const handleDependencyDeleted = useCallback((deletedDependencyId: string) => {
+    setDependencies(prev => prev.filter(dep => dep.id !== deletedDependencyId));
+    setSelectedDependency(null);
+    console.log('依存関係が削除されました:', deletedDependencyId);
+  }, []);
+
+  // 日程調整の処理（WebSocket通知から）
+  const handleScheduleAdjusted = useCallback((adjustedIssues: any[]) => {
+    console.log('スケジュール調整が完了しました:', adjustedIssues);
+    // Issues再取得をトリガー
+    if (onIssuesUpdate) {
+      console.log('Issues更新をトリガーします...');
+    }
+  }, [onIssuesUpdate]);
+
+  // ガントチャート更新ハンドラー（WebSocket通知から）
+  const handleGanttUpdate = useCallback(() => {
+    console.log('ガントチャートの更新が必要です');
+    // 依存関係を再取得
+    fetchDependencies();
+  }, [fetchDependencies]);
+
+  // 依存関係操作エラーハンドラー
+  const handleDependencyError = useCallback((error: string) => {
+    console.error('依存関係操作エラー:', error);
+    setDependenciesError(error);
+    
+    // 5秒後にエラーをクリア
+    setTimeout(() => {
+      setDependenciesError(null);
+    }, 5000);
+  }, []);
+
   // ドラッグ開始
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -168,31 +210,39 @@ const GanttLayout: React.FC<GanttLayoutProps> = ({
 
   const currentSplitSize = isDragging ? tempSplitSize : splitSize;
 
+  // 依存関係タイプの短縮形変換
+  const getDependencyTypeShort = (dependency: Dependency): string => {
+    if (dependency.type) return dependency.type;
+    
+    switch (dependency.dependency_type) {
+      case 'finish_to_start': return 'FS';
+      case 'start_to_start': return 'SS';
+      case 'finish_to_finish': return 'FF';
+      case 'start_to_finish': return 'SF';
+      default: return 'FS';
+    }
+  };
+
   // ExtendedGanttChartPropsに適合するprops
   const ganttChartProps: ExtendedGanttChartProps = {
     issues,
     dependencies,
-    projectId,
-    onTaskChange,
+    selectedIssue,
+    selectedDependency,
     onTaskSelect: handleGanttTaskSelect,
     onDependencySelect: handleDependencySelect,
     onDependencyHover: handleDependencyHover,
-    selectedDependency,
+    width: 800,
     height: 400,
     readOnly: userRole !== 'editor',
     loading: isLoading || dependenciesLoading,
+    editorRole: userRole === 'editor', // Editor権限チェック
+    enableDragDrop: userRole === 'editor', // ドラッグ&ドロップ有効化
     options: {
       viewMode: 'Week',
       locale: 'ja-JP',
-      allowDrag: userRole === 'editor',
-      allowResize: userRole === 'editor',
-      allowProgressChange: userRole === 'editor',
-    },
-    displaySettings: {
-      showHierarchy: true,
-      showProgress: true,
-      showDependencies: true,
-      timeScale: 'day',
+      showWeekends: true,
+      showHolidays: true,
     },
   };
 
@@ -201,65 +251,81 @@ const GanttLayout: React.FC<GanttLayoutProps> = ({
       ref={containerRef}
       className="h-full flex bg-white overflow-hidden"
     >
+      {/* WebSocket通知ハンドラー（ガント機能専用） */}
+      <GanttNotificationHandler
+        projectId={projectId}
+        onIssuesUpdate={onIssuesUpdate}
+        onGanttUpdate={handleGanttUpdate}
+        onError={handleDependencyError}
+        showToast={true}
+      />
+
       {/* 左パネル: WBSツリー */}
       <div 
-        className="border-r border-gray-200 overflow-hidden"
+        className="border-r border-gray-200 bg-gray-50 overflow-hidden flex flex-col"
         style={{ width: `${currentSplitSize}%` }}
       >
-        <div className="h-full overflow-auto">
+        <div className="p-3 bg-white border-b border-gray-200 flex-shrink-0">
+          <h3 className="text-sm font-medium text-gray-900">WBS構造</h3>
+          <p className="text-xs text-gray-500 mt-1">
+            課題の階層構造を管理できます
+          </p>
+        </div>
+        
+        <div className="flex-1 overflow-auto p-2">
           <DraggableWBSTree
-            projectId={projectId}
             issues={issues}
-            isLoading={isLoading}
-            onIssueClick={onIssueClick}
-            onIssuesUpdate={onIssuesUpdate}
-            selectedIssueId={selectedIssue?.id}
-            enableDragDrop={userRole === 'editor'}
-            showControls={true}
+            selectedIssue={selectedIssue}
+            onIssueClick={(issue) => {
+              setSelectedIssue(issue);
+              onIssueClick?.(issue);
+            }}
+            onIssuesReorder={onIssuesUpdate}
+            projectId={projectId}
+            editable={userRole === 'editor'}
+            showProgress={true}
+            showDates={true}
           />
         </div>
       </div>
 
-      {/* リサイズハンドル */}
-      <div 
-        className={`w-1 bg-gray-200 hover:bg-gray-300 cursor-col-resize transition-colors relative ${
-          isDragging ? 'bg-blue-400' : ''
-        }`}
+      {/* 分割バー */}
+      <div
+        className="w-1 bg-gray-300 hover:bg-gray-400 cursor-col-resize flex-shrink-0 relative group"
         onMouseDown={handleMouseDown}
       >
-        {/* リサイズインジケーター */}
-        <div className="absolute inset-y-0 left-0 w-full flex items-center justify-center">
-          <div className="w-0.5 h-8 bg-gray-400 rounded-full opacity-60"></div>
-        </div>
+        <div className="absolute inset-y-0 -left-1 -right-1" />
+        {isDragging && (
+          <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-blue-500 text-white text-xs px-2 py-1 rounded pointer-events-none">
+            {Math.round(currentSplitSize)}%
+          </div>
+        )}
       </div>
 
-      {/* 右パネル: ガントチャート */}
+      {/* 右パネル: ガントチャート（WebSocket通知対応） */}
       <div 
         className="overflow-hidden"
         style={{ width: `${100 - currentSplitSize}%` }}
       >
-        <div className="h-full overflow-auto">
-          <div className="p-4">
-            {/* ガントチャートヘッダー */}
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-lg font-medium text-gray-900">ガントチャート</h2>
-              <div className="flex items-center space-x-4">
-                {selectedIssue && (
-                  <div className="text-sm text-gray-600">
-                    選択中: <span className="font-medium">{selectedIssue.title}</span>
-                    {onIssueClick && (
-                      <button
-                        onClick={() => onIssueClick(selectedIssue)}
-                        className="ml-2 text-blue-600 hover:text-blue-800 underline"
-                      >
-                        詳細を見る
-                      </button>
-                    )}
+        <div className="h-full flex flex-col">
+          <div className="p-3 bg-white border-b border-gray-200 flex-shrink-0">
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-sm font-medium text-gray-900">ガントチャート</h3>
+                <p className="text-xs text-gray-500 mt-1">
+                  タスクの時系列進捗と依存関係を表示
+                </p>
+              </div>
+              
+              <div className="flex items-center space-x-2">
+                {selectedDependency && (
+                  <div className="text-xs text-green-600 bg-green-50 px-2 py-1 rounded">
+                    依存関係選択中
                   </div>
                 )}
-                {selectedDependency && (
-                  <div className="text-sm text-green-600">
-                    依存関係選択中
+                {userRole === 'editor' && (
+                  <div className="text-xs text-blue-600 bg-blue-50 px-2 py-1 rounded">
+                    右クリックで依存関係編集
                   </div>
                 )}
               </div>
@@ -267,15 +333,15 @@ const GanttLayout: React.FC<GanttLayoutProps> = ({
 
             {/* 依存関係エラー表示 */}
             {dependenciesError && (
-              <div className="mb-4 bg-yellow-50 border border-yellow-200 rounded-md p-3">
+              <div className="mb-4 bg-red-50 border border-red-200 rounded-md p-3">
                 <div className="flex">
-                  <div className="text-yellow-400 mr-2">⚠️</div>
+                  <div className="text-red-400 mr-2">⚠️</div>
                   <div>
-                    <p className="text-sm font-medium text-yellow-800">依存関係の読み込みエラー</p>
-                    <p className="text-xs text-yellow-700 mt-1">{dependenciesError}</p>
+                    <p className="text-sm font-medium text-red-800">依存関係操作エラー</p>
+                    <p className="text-xs text-red-700 mt-1">{dependenciesError}</p>
                     <button
                       onClick={fetchDependencies}
-                      className="mt-2 text-xs text-yellow-800 underline hover:text-yellow-900"
+                      className="mt-2 text-xs text-red-800 underline hover:text-red-900"
                     >
                       再読み込み
                     </button>
@@ -284,27 +350,33 @@ const GanttLayout: React.FC<GanttLayoutProps> = ({
               </div>
             )}
             
-            {/* ガントチャート */}
-            <GanttChart {...ganttChartProps} />
+            {/* 依存関係編集機能付きガントチャート */}
+            <DependencyEditor
+              projectId={projectId}
+              issues={issues}
+              dependencies={dependencies}
+              onDependencyCreated={handleDependencyCreated}
+              onDependencyDeleted={handleDependencyDeleted}
+              onError={handleDependencyError}
+              editorRole={userRole === 'editor'}
+            >
+              <GanttChart {...ganttChartProps} />
+            </DependencyEditor>
 
             {/* 依存関係統計情報 */}
             {dependencies.length > 0 && (
-              <div className="mt-4 bg-gray-50 rounded-lg p-3">
+              <div className="mt-4 pt-4 border-t border-gray-100">
                 <div className="flex items-center justify-between text-sm text-gray-600">
                   <span>
                     依存関係: {dependencies.length}件
-                    {dependencies.filter(dep => dep.type === 'FS').length > 0 && (
-                      <span className="ml-2">（FS: {dependencies.filter(dep => dep.type === 'FS').length}件）</span>
+                    {dependencies.filter(dep => getDependencyTypeShort(dep) === 'FS').length > 0 && (
+                      <span className="ml-2">（FS: {dependencies.filter(dep => getDependencyTypeShort(dep) === 'FS').length}件）</span>
                     )}
                   </span>
                   {userRole === 'editor' && (
-                    <button
-                      onClick={fetchDependencies}
-                      className="text-blue-600 hover:text-blue-800 underline"
-                      disabled={dependenciesLoading}
-                    >
-                      {dependenciesLoading ? '更新中...' : '依存関係を更新'}
-                    </button>
+                    <div className="text-xs text-gray-500">
+                      ドラッグ&ドロップで依存関係作成
+                    </div>
                   )}
                 </div>
               </div>

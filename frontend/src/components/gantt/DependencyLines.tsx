@@ -18,6 +18,7 @@ export interface Dependency {
   predecessor_issue_id: string;
   successor_issue_id: string;
   dependency_type: 'finish_to_start' | 'start_to_start' | 'finish_to_finish' | 'start_to_finish';
+  type?: 'FS' | 'SS' | 'FF' | 'SF'; // UI用の短縮形（互換性のため）
   lag_days?: number; // 遅延日数（負の値も可能）
   is_active: boolean;
   created_at: string;
@@ -34,7 +35,7 @@ export interface DependencyLinesProps {
   containerRef: React.RefObject<HTMLElement>;
   rowHeight: number;
   selectedDependency?: string | null;
-  onDependencySelect?: (dependency: Dependency | null) => void;
+  onDependencySelect?: (dependency: Dependency | null, event?: React.MouseEvent) => void;
   onDependencyHover?: (dependency: Dependency | null) => void;
   onDependencyRightClick?: (dependencyId: string, event: React.MouseEvent) => void;
   options?: Partial<DependencyLineOptions>;
@@ -59,187 +60,200 @@ const DependencyLines: React.FC<DependencyLinesProps> = ({
   disabled = false,
   className = '',
 }) => {
-  const [taskPositions, setTaskPositions] = useState<TaskPosition[]>([]);
-  const [dependencyLines, setDependencyLines] = useState<DependencyLine[]>([]);
-  const [warnings, setWarnings] = useState<string[]>([]);
   const svgRef = useRef<SVGSVGElement>(null);
+  const [taskPositions, setTaskPositions] = useState<Record<string, TaskPosition>>({});
+  const [visibleDependencyLines, setVisibleDependencyLines] = useState<DependencyLine[]>([]);
+  const [hoveredDependency, setHoveredDependency] = useState<string | null>(null);
 
-  // 依存関係線のオプション設定
+  // オプションのマージ
   const lineOptions = useMemo(() => ({
     ...DEFAULT_DEPENDENCY_LINE_OPTIONS,
     ...options,
   }), [options]);
 
-  // タスクの位置情報を更新
-  useEffect(() => {
+  // タスク位置の更新
+  const updatePositions = useCallback(() => {
     if (!containerRef.current) return;
 
     const positions = updateTaskPositions(issues, containerRef.current, rowHeight);
     setTaskPositions(positions);
   }, [issues, containerRef, rowHeight]);
 
-  // 依存関係線の計算と描画
-  useEffect(() => {
-    if (!taskPositions.length || !dependencies.length) {
-      setDependencyLines([]);
-      setWarnings([]);
-      return;
-    }
+  // 依存関係線の再計算
+  const recalculateLines = useCallback(() => {
+    if (!Object.keys(taskPositions).length) return;
 
-    try {
-      // 表示可能な依存関係のフィルタリング
-      const visibleDeps = filterVisibleDependencies(
-        dependencies,
-        issues,
-        taskPositions
+    const lines = dependencies.map(dependency => {
+      const predecessorPos = taskPositions[dependency.predecessor_issue_id];
+      const successorPos = taskPositions[dependency.successor_issue_id];
+
+      if (!predecessorPos || !successorPos) return null;
+
+      const path = calculateFSArrowPath(
+        predecessorPos,
+        successorPos,
+        lineOptions
       );
 
-      // 依存関係線の計算
-      const lines: DependencyLine[] = [];
-      const newWarnings: string[] = [];
+      return {
+        dependency,
+        path,
+        isSelected: selectedDependency === dependency.id,
+        isHovered: hoveredDependency === dependency.id,
+        isValid: true,
+        predecessorPos,
+        successorPos,
+      } as DependencyLine;
+    }).filter(Boolean) as DependencyLine[];
 
-      for (const dep of visibleDeps) {
-        const predecessorPos = taskPositions.find(p => p.issueId === dep.predecessor_issue_id);
-        const successorPos = taskPositions.find(p => p.issueId === dep.successor_issue_id);
+    const visibleLines = filterVisibleDependencies(lines, containerRef.current);
+    setVisibleDependencyLines(visibleLines);
+  }, [dependencies, taskPositions, lineOptions, selectedDependency, hoveredDependency, containerRef]);
 
-        if (!predecessorPos || !successorPos) {
-          newWarnings.push(`依存関係 ${dep.id} のタスク位置を特定できませんでした`);
-          continue;
-        }
+  // 初期化とイベントハンドラー
+  useEffect(() => {
+    updatePositions();
+  }, [updatePositions]);
 
-        // FS (Finish-to-Start) パスの計算
-        const path = calculateFSArrowPath(
-          predecessorPos,
-          successorPos,
-          lineOptions
-        );
+  useEffect(() => {
+    recalculateLines();
+  }, [recalculateLines]);
 
-        if (path) {
-          lines.push({
-            id: dep.id,
-            dependency: dep,
-            path,
-            isSelected: selectedDependency === dep.id,
-            style: {
-              stroke: dep.isSelected ? lineOptions.selectedColor : lineOptions.defaultColor,
-              strokeWidth: dep.isSelected ? lineOptions.selectedWidth : lineOptions.defaultWidth,
-              strokeDasharray: dep.is_active ? 'none' : '5,5',
-            },
-          });
-        } else {
-          newWarnings.push(`依存関係 ${dep.id} の線描画に失敗しました`);
-        }
-      }
+  // スクロール・リサイズイベントリスナー
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
 
-      setDependencyLines(lines);
-      setWarnings(newWarnings);
-    } catch (error) {
-      console.error('Failed to calculate dependency lines:', error);
-      setWarnings([`依存関係線の計算中にエラーが発生しました: ${error}`]);
-    }
-  }, [taskPositions, dependencies, selectedDependency, lineOptions, issues]);
+    const handleScroll = () => {
+      updatePositions();
+    };
 
-  // 依存関係線のクリックハンドラー
-  const handleDependencyClick = useCallback((dependency: Dependency, event?: React.MouseEvent) => {
+    const handleResize = () => {
+      updatePositions();
+    };
+
+    container.addEventListener('scroll', handleScroll);
+    window.addEventListener('resize', handleResize);
+
+    return () => {
+      container.removeEventListener('scroll', handleScroll);
+      window.removeEventListener('resize', handleResize);
+    };
+  }, [updatePositions]);
+
+  // 依存関係線クリックハンドラー
+  const handleDependencyClick = useCallback((line: DependencyLine, event: React.MouseEvent) => {
     if (disabled) return;
-    
-    if (event?.button === 2) {
-      // 右クリック
-      event.preventDefault();
-      onDependencyRightClick?.(dependency.id, event);
-    } else {
-      // 左クリック（選択）
-      onDependencySelect?.(dependency);
-    }
-  }, [disabled, onDependencySelect, onDependencyRightClick]);
 
-  // 依存関係線のホバーハンドラー
-  const handleDependencyHover = useCallback((dependency: Dependency | null) => {
-    if (disabled || !onDependencyHover) return;
-    
-    onDependencyHover(dependency);
+    event.preventDefault();
+    event.stopPropagation();
+
+    if (event.button === 2) {
+      // 右クリック
+      onDependencyRightClick?.(line.dependency.id, event);
+    } else {
+      // 左クリック
+      onDependencySelect?.(line.dependency, event);
+    }
+  }, [disabled, onDependencyRightClick, onDependencySelect]);
+
+  // 依存関係線ホバーハンドラー
+  const handleDependencyHover = useCallback((line: DependencyLine | null) => {
+    if (disabled) return;
+
+    const dependencyId = line?.dependency.id || null;
+    setHoveredDependency(dependencyId);
+    onDependencyHover?.(line?.dependency || null);
   }, [disabled, onDependencyHover]);
 
-  // SVGのサイズ計算
-  const svgDimensions = useMemo(() => {
-    if (!containerRef.current) return { width: 0, height: 0 };
-    
-    const container = containerRef.current;
-    return {
-      width: container.scrollWidth,
-      height: container.scrollHeight,
-    };
-  }, [containerRef, taskPositions]);
+  // SVGサイズの計算
+  const containerRect = containerRef.current?.getBoundingClientRect();
+  const svgWidth = containerRect?.width || 0;
+  const svgHeight = containerRect?.height || 0;
 
-  // 表示する依存関係がない場合
-  if (dependencyLines.length === 0) {
+  if (!containerRef.current || visibleDependencyLines.length === 0) {
     return null;
   }
 
   return (
-    <div className={`dependency-lines-container ${className}`}>
-      {/* 警告メッセージ */}
-      {warnings.length > 0 && (
-        <div className="dependency-warnings mb-2">
-          {warnings.map((warning, index) => (
-            <div key={index} className="text-xs text-yellow-600 bg-yellow-50 px-2 py-1 rounded">
-              ⚠️ {warning}
-            </div>
-          ))}
-        </div>
-      )}
-
-      {/* SVG依存関係線 */}
-      <svg
-        ref={svgRef}
-        className="dependency-lines-svg absolute top-0 left-0 pointer-events-none"
-        style={{
-          width: svgDimensions.width,
-          height: svgDimensions.height,
-          zIndex: 10,
-        }}
-      >
-        {/* 依存関係線の描画 */}
-        {dependencyLines.map((line) => (
-          <DependencyArrow
-            key={line.id}
-            dependency={line.dependency}
-            path={line.path}
-            isSelected={line.isSelected}
-            onClick={(event) => handleDependencyClick(line.dependency, event)}
-            onHover={(isHovered) => 
-              handleDependencyHover(isHovered ? line.dependency : null)
-            }
-            disabled={disabled}
-            style={line.style}
-            onContextMenu={(event) => handleDependencyClick(line.dependency, event)}
+    <svg
+      ref={svgRef}
+      className={`absolute top-0 left-0 pointer-events-none ${className}`}
+      width={svgWidth}
+      height={svgHeight}
+      style={{ zIndex: 10 }}
+    >
+      <defs>
+        {/* 矢印マーカー定義 */}
+        <marker
+          id="dependency-arrow"
+          markerWidth="10"
+          markerHeight="10"
+          refX="9"
+          refY="3"
+          orient="auto"
+          markerUnits="strokeWidth"
+        >
+          <polygon
+            points="0,0 0,6 9,3"
+            fill={lineOptions.arrowColor}
+            stroke={lineOptions.arrowColor}
+            strokeWidth="1"
           />
-        ))}
+        </marker>
+        <marker
+          id="dependency-arrow-selected"
+          markerWidth="12"
+          markerHeight="12"
+          refX="10"
+          refY="4"
+          orient="auto"
+          markerUnits="strokeWidth"
+        >
+          <polygon
+            points="0,0 0,8 10,4"
+            fill={lineOptions.selectedColor}
+            stroke={lineOptions.selectedColor}
+            strokeWidth="2"
+          />
+        </marker>
+      </defs>
 
-        {/* 選択された依存関係のハイライト */}
-        {selectedDependency && (
-          <defs>
-            <filter id="selected-glow">
-              <feGaussianBlur stdDeviation="2" result="coloredBlur"/>
-              <feMerge> 
-                <feMergeNode in="coloredBlur"/>
-                <feMergeNode in="SourceGraphic"/>
-              </feMerge>
-            </filter>
-          </defs>
-        )}
-      </svg>
+      {/* 依存関係線の描画 */}
+      {visibleDependencyLines.map((line) => (
+        <g key={line.dependency.id}>
+          {/* 依存関係矢印線 */}
+          <DependencyArrow
+            line={line}
+            options={lineOptions}
+            onClick={(event) => handleDependencyClick(line, event)}
+            onMouseEnter={() => handleDependencyHover(line)}
+            onMouseLeave={() => handleDependencyHover(null)}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              onDependencyRightClick?.(line.dependency.id, event);
+            }}
+            disabled={disabled}
+          />
 
-      {/* デバッグ情報 */}
-      {process.env.NODE_ENV === 'development' && (
-        <div className="dependency-debug-info absolute bottom-0 right-0 bg-black bg-opacity-75 text-white text-xs p-2 rounded">
-          <div>依存関係: {dependencyLines.length}</div>
-          <div>タスク位置: {taskPositions.length}</div>
-          <div>SVG: {svgDimensions.width}×{svgDimensions.height}</div>
-          {selectedDependency && <div>選択中: {selectedDependency}</div>}
-        </div>
-      )}
-    </div>
+          {/* 依存関係ラベル（選択時のみ） */}
+          {line.isSelected && lineOptions.showLabels && (
+            <text
+              x={(line.predecessorPos.right + line.successorPos.left) / 2}
+              y={line.predecessorPos.centerY - 10}
+              className="text-xs fill-current text-gray-600"
+              textAnchor="middle"
+              style={{ pointerEvents: 'none' }}
+            >
+              {line.dependency.dependency_type === 'finish_to_start' ? 'FS' :
+               line.dependency.dependency_type === 'start_to_start' ? 'SS' :
+               line.dependency.dependency_type === 'finish_to_finish' ? 'FF' : 'SF'}
+              {line.dependency.lag_days ? ` (${line.dependency.lag_days}d)` : ''}
+            </text>
+          )}
+        </g>
+      ))}
+    </svg>
   );
 };
 
