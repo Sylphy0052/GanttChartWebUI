@@ -1,0 +1,607 @@
+name: Production Deploy
+
+on:
+  push:
+    branches: [ main ]
+  release:
+    types: [ published ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment Environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+        - production
+        - staging
+      skip_tests:
+        description: 'Skip test execution'
+        required: false
+        default: false
+        type: boolean
+
+env:
+  NODE_VERSION: '20'
+  POSTGRES_VERSION: '15'
+
+jobs:
+  quality-gate:
+    name: Quality Gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    outputs:
+      test-passed: ${{ steps.tests.outputs.passed }}
+      coverage-passed: ${{ steps.coverage.outputs.passed }}
+      lint-passed: ${{ steps.lint.outputs.passed }}
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: gantt_user
+          POSTGRES_PASSWORD: gantt_pass
+          POSTGRES_DB: gantt_db_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    env:
+      DATABASE_URL: postgresql://gantt_user:gantt_pass@localhost:5432/gantt_db_test?schema=public
+      NODE_ENV: test
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+
+      - name: Install Backend Dependencies
+        working-directory: ./backend
+        run: npm ci
+
+      - name: Install Frontend Dependencies
+        working-directory: ./frontend
+        run: npm ci
+
+      - name: Setup Database
+        working-directory: ./backend
+        run: |
+          npx prisma generate
+          npx prisma migrate reset --force --skip-generate
+          npx prisma migrate deploy
+
+      - name: Backend Lint Check
+        id: backend-lint
+        working-directory: ./backend
+        run: |
+          npm run lint
+          echo "passed=true" >> $GITHUB_OUTPUT
+        continue-on-error: false
+
+      - name: Frontend Lint Check
+        id: frontend-lint
+        working-directory: ./frontend
+        run: |
+          npm run lint
+          echo "passed=true" >> $GITHUB_OUTPUT
+        continue-on-error: false
+
+      - name: Backend Unit Tests
+        id: backend-tests
+        working-directory: ./backend
+        run: |
+          npm run test:cov
+          echo "passed=true" >> $GITHUB_OUTPUT
+
+      - name: Backend E2E Tests
+        id: backend-e2e
+        working-directory: ./backend
+        run: |
+          npm run test:e2e
+          echo "passed=true" >> $GITHUB_OUTPUT
+
+      - name: Check Coverage Requirements
+        id: coverage
+        working-directory: ./backend
+        run: |
+          # Extract coverage from jest-html-reporters output
+          if [ -f coverage/coverage-summary.json ]; then
+            COVERAGE=$(node -p "Math.round(JSON.parse(require('fs').readFileSync('coverage/coverage-summary.json')).total.lines.pct)")
+            echo "Coverage: ${COVERAGE}%"
+            if [ $COVERAGE -ge 80 ]; then
+              echo "✅ Coverage requirement met: ${COVERAGE}% >= 80%"
+              echo "passed=true" >> $GITHUB_OUTPUT
+            else
+              echo "❌ Coverage requirement not met: ${COVERAGE}% < 80%"
+              echo "passed=false" >> $GITHUB_OUTPUT
+              exit 1
+            fi
+          else
+            echo "❌ Coverage report not found"
+            echo "passed=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+      - name: Build Application
+        run: |
+          # Backend build
+          cd backend && npm run build
+          # Frontend build
+          cd ../frontend && npm run build
+
+      - name: Set Quality Gate Results
+        id: tests
+        run: |
+          echo "passed=true" >> $GITHUB_OUTPUT
+      
+      - name: Set Lint Gate Results
+        id: lint
+        run: |
+          echo "passed=true" >> $GITHUB_OUTPUT
+
+      - name: Upload Coverage Reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-reports
+          path: |
+            backend/coverage/
+          retention-days: 30
+
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: quality-gate
+    if: needs.quality-gate.outputs.test-passed == 'true'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: |
+          cd backend && npm ci
+          cd ../frontend && npm ci
+
+      - name: Run npm audit (Backend)
+        working-directory: ./backend
+        run: |
+          npm audit --audit-level high --production
+          npm audit --audit-level critical --production
+
+      - name: Run npm audit (Frontend)
+        working-directory: ./frontend
+        run: |
+          npm audit --audit-level high --production
+          npm audit --audit-level critical --production
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: typescript, javascript
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:typescript"
+
+  docker-security-scan:
+    name: Docker Image Security Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: quality-gate
+    if: needs.quality-gate.outputs.test-passed == 'true'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Build Docker Images
+        run: |
+          docker build -f infra/Dockerfile.backend.production -t gantt-backend:latest ./backend
+          docker build -f infra/Dockerfile.frontend.production -t gantt-frontend:latest ./frontend
+
+      - name: Run Trivy vulnerability scanner (Backend)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'gantt-backend:latest'
+          format: 'sarif'
+          output: 'trivy-backend-results.sarif'
+
+      - name: Run Trivy vulnerability scanner (Frontend)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'gantt-frontend:latest'
+          format: 'sarif'
+          output: 'trivy-frontend-results.sarif'
+
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-backend-results.sarif'
+
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-frontend-results.sarif'
+
+  e2e-tests:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: quality-gate
+    if: needs.quality-gate.outputs.test-passed == 'true' && github.event.inputs.skip_tests != 'true'
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: gantt_user
+          POSTGRES_PASSWORD: gantt_pass
+          POSTGRES_DB: gantt_db_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    env:
+      DATABASE_URL: postgresql://gantt_user:gantt_pass@localhost:5432/gantt_db_test?schema=public
+      NODE_ENV: test
+      NEXT_PUBLIC_API_URL: http://localhost:3001
+      NEXT_PUBLIC_WS_URL: ws://localhost:3001
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+
+      - name: Install Dependencies
+        run: |
+          cd backend && npm ci
+          cd ../frontend && npm ci
+
+      - name: Setup Database
+        working-directory: ./backend
+        run: |
+          npx prisma generate
+          npx prisma migrate reset --force --skip-generate
+          npx prisma migrate deploy
+
+      - name: Start Backend Server
+        working-directory: ./backend
+        run: |
+          npm run start:dev &
+          echo $! > backend.pid
+          timeout 60 bash -c 'until curl -f http://localhost:3001/health; do sleep 1; done'
+
+      - name: Build and Start Frontend
+        working-directory: ./frontend
+        run: |
+          npm run build
+          npm run start &
+          echo $! > frontend.pid
+          timeout 60 bash -c 'until curl -f http://localhost:3000; do sleep 1; done'
+
+      - name: Run Cypress E2E Tests
+        working-directory: ./frontend
+        run: |
+          npx cypress run --config-file cypress.config.docker.ts \
+            --browser chrome --headless \
+            --config baseUrl=http://localhost:3000,env.backendUrl=http://localhost:3001
+
+      - name: Upload E2E Test Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-test-results
+          path: |
+            frontend/cypress/screenshots/
+            frontend/cypress/videos/
+            frontend/cypress/results/
+          retention-days: 14
+
+      - name: Cleanup E2E
+        if: always()
+        run: |
+          [ -f backend/backend.pid ] && kill $(cat backend/backend.pid) || true
+          [ -f frontend/frontend.pid ] && kill $(cat frontend/frontend.pid) || true
+
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: [quality-gate, security-scan, docker-security-scan, e2e-tests]
+    if: |
+      always() && 
+      needs.quality-gate.result == 'success' &&
+      needs.security-scan.result == 'success' &&
+      needs.docker-security-scan.result == 'success' &&
+      (needs.e2e-tests.result == 'success' || needs.e2e-tests.result == 'skipped') &&
+      github.ref == 'refs/heads/main'
+    
+    environment:
+      name: ${{ github.event.inputs.environment || 'production' }}
+      url: ${{ vars.PRODUCTION_URL || 'https://your-domain.com' }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        if: vars.AWS_REGION
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Login to Docker Registry
+        if: secrets.DOCKER_REGISTRY_URL
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.DOCKER_REGISTRY_URL }}
+          username: ${{ secrets.DOCKER_REGISTRY_USER }}
+          password: ${{ secrets.DOCKER_REGISTRY_TOKEN }}
+
+      - name: Build and Push Production Images
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+          REGISTRY: ${{ secrets.DOCKER_REGISTRY_URL || 'ghcr.io' }}
+        run: |
+          # Build production images
+          docker build -f infra/Dockerfile.backend.production \
+            -t ${REGISTRY}/gantt-backend:${IMAGE_TAG} \
+            -t ${REGISTRY}/gantt-backend:latest \
+            ./backend
+
+          docker build -f infra/Dockerfile.frontend.production \
+            -t ${REGISTRY}/gantt-frontend:${IMAGE_TAG} \
+            -t ${REGISTRY}/gantt-frontend:latest \
+            ./frontend
+
+          # Push images
+          docker push ${REGISTRY}/gantt-backend:${IMAGE_TAG}
+          docker push ${REGISTRY}/gantt-backend:latest
+          docker push ${REGISTRY}/gantt-frontend:${IMAGE_TAG}
+          docker push ${REGISTRY}/gantt-frontend:latest
+
+      - name: Deploy to Server
+        if: secrets.DEPLOY_HOST
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          script: |
+            cd /opt/ganttchart-webui
+            
+            # Create backup of current deployment
+            docker compose -f infra/docker-compose.production.yml down
+            sudo cp -r data/ data_backup_$(date +%Y%m%d_%H%M%S)
+            
+            # Pull latest code and images
+            git pull origin main
+            docker compose -f infra/docker-compose.production.yml pull
+            
+            # Apply database migrations
+            docker compose -f infra/docker-compose.production.yml run --rm backend npx prisma migrate deploy
+            
+            # Blue-Green deployment: start new services
+            docker compose -f infra/docker-compose.production.yml up -d
+            
+            # Health check
+            timeout 120 bash -c 'until curl -f http://localhost/health; do sleep 5; done'
+            
+            # Clean up old images
+            docker image prune -f
+
+      - name: Alternative Deploy (Docker Compose file)
+        if: "!secrets.DEPLOY_HOST"
+        run: |
+          echo "📦 Production deployment artifacts ready"
+          echo "Docker images built and available for deployment"
+          echo "To deploy manually:"
+          echo "1. Copy infra/docker-compose.production.yml to your server"
+          echo "2. Set environment variables (.env.production)"
+          echo "3. Run: docker compose -f docker-compose.production.yml up -d"
+
+      - name: Run Post-Deployment Tests
+        if: secrets.PRODUCTION_URL
+        run: |
+          # Basic health checks
+          curl -f ${{ vars.PRODUCTION_URL }}/health
+          
+          # Performance check (response time < 2s)
+          RESPONSE_TIME=$(curl -w "%{time_total}" -s -o /dev/null ${{ vars.PRODUCTION_URL }})
+          if (( $(echo "$RESPONSE_TIME > 2.0" | bc -l) )); then
+            echo "❌ Performance check failed: ${RESPONSE_TIME}s > 2.0s"
+            exit 1
+          else
+            echo "✅ Performance check passed: ${RESPONSE_TIME}s"
+          fi
+
+      - name: Rollback on Failure
+        if: failure() && secrets.DEPLOY_HOST
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: ${{ secrets.DEPLOY_PORT || 22 }}
+          script: |
+            echo "🔄 Rolling back deployment..."
+            cd /opt/ganttchart-webui
+            
+            # Stop current services
+            docker compose -f infra/docker-compose.production.yml down
+            
+            # Restore previous backup (find latest)
+            LATEST_BACKUP=$(ls -td data_backup_* 2>/dev/null | head -n1)
+            if [ -n "$LATEST_BACKUP" ]; then
+              echo "Restoring from backup: $LATEST_BACKUP"
+              sudo rm -rf data/
+              sudo cp -r "$LATEST_BACKUP" data/
+            fi
+            
+            # Restart with previous version
+            git reset --hard HEAD~1
+            docker compose -f infra/docker-compose.production.yml up -d
+            
+            echo "✅ Rollback completed"
+
+  notification:
+    name: Send Notifications
+    runs-on: ubuntu-latest
+    needs: [quality-gate, security-scan, docker-security-scan, e2e-tests, deploy-production]
+    if: always()
+
+    steps:
+      - name: Prepare Notification Data
+        id: prepare
+        run: |
+          # Determine overall status
+          if [[ "${{ needs.deploy-production.result }}" == "success" ]]; then
+            echo "status=✅ SUCCESS" >> $GITHUB_OUTPUT
+            echo "color=good" >> $GITHUB_OUTPUT
+          elif [[ "${{ needs.deploy-production.result }}" == "failure" ]]; then
+            echo "status=❌ FAILED" >> $GITHUB_OUTPUT
+            echo "color=danger" >> $GITHUB_OUTPUT
+          else
+            echo "status=⚠️ SKIPPED" >> $GITHUB_OUTPUT
+            echo "color=warning" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Slack Notification
+        if: secrets.SLACK_WEBHOOK_URL
+        uses: 8398a7/action-slack@v3
+        with:
+          status: custom
+          custom_payload: |
+            {
+              "text": "GanttChart WebUI Deployment",
+              "attachments": [
+                {
+                  "color": "${{ steps.prepare.outputs.color }}",
+                  "fields": [
+                    {
+                      "title": "Status",
+                      "value": "${{ steps.prepare.outputs.status }}",
+                      "short": true
+                    },
+                    {
+                      "title": "Environment",
+                      "value": "${{ github.event.inputs.environment || 'production' }}",
+                      "short": true
+                    },
+                    {
+                      "title": "Commit",
+                      "value": "<${{ github.event.repository.html_url }}/commit/${{ github.sha }}|${{ github.sha }}>",
+                      "short": true
+                    },
+                    {
+                      "title": "Branch",
+                      "value": "${{ github.ref_name }}",
+                      "short": true
+                    },
+                    {
+                      "title": "Quality Gate",
+                      "value": "${{ needs.quality-gate.result == 'success' && '✅' || '❌' }}",
+                      "short": true
+                    },
+                    {
+                      "title": "Security Scan",
+                      "value": "${{ needs.security-scan.result == 'success' && '✅' || '❌' }}",
+                      "short": true
+                    }
+                  ],
+                  "footer": "GitHub Actions",
+                  "ts": ${{ github.event.head_commit.timestamp }}
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+      - name: Discord Notification
+        if: secrets.DISCORD_WEBHOOK_URL
+        uses: Ilshidur/action-discord@master
+        with:
+          args: |
+            **GanttChart WebUI Deployment** ${{ steps.prepare.outputs.status }}
+            
+            **Environment**: ${{ github.event.inputs.environment || 'production' }}
+            **Branch**: ${{ github.ref_name }}
+            **Commit**: [`${{ github.sha }}`](${{ github.event.repository.html_url }}/commit/${{ github.sha }})
+            
+            **Quality Gate**: ${{ needs.quality-gate.result == 'success' && '✅ Passed' || '❌ Failed' }}
+            **Security Scan**: ${{ needs.security-scan.result == 'success' && '✅ Passed' || '❌ Failed' }}
+            **E2E Tests**: ${{ needs.e2e-tests.result == 'success' && '✅ Passed' || needs.e2e-tests.result == 'skipped' && '⏭️ Skipped' || '❌ Failed' }}
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+
+      - name: GitHub Release
+        if: github.event_name == 'release' && needs.deploy-production.result == 'success'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            infra/docker-compose.production.yml
+          body: |
+            ## Deployment Information
+            
+            - **Environment**: ${{ github.event.inputs.environment || 'production' }}
+            - **Deployment Status**: ${{ steps.prepare.outputs.status }}
+            - **Test Coverage**: Backend ≥80%
+            - **Security Scan**: Passed
+            - **Performance**: Response time <2s
+            
+            ## Quality Metrics
+            
+            - Quality Gate: ${{ needs.quality-gate.result == 'success' && '✅ Passed' || '❌ Failed' }}
+            - Security Scan: ${{ needs.security-scan.result == 'success' && '✅ Passed' || '❌ Failed' }}
+            - Docker Security: ${{ needs.docker-security-scan.result == 'success' && '✅ Passed' || '❌ Failed' }}
+            - E2E Tests: ${{ needs.e2e-tests.result == 'success' && '✅ Passed' || needs.e2e-tests.result == 'skipped' && '⏭️ Skipped' || '❌ Failed' }}
+            
+            ## Rollback Plan
+            
+            If issues occur, rollback using:
+            ```bash
+            git revert ${{ github.sha }}
+            docker compose -f docker-compose.production.yml down
+            # Restore from backup_$(date +%Y%m%d_%H%M%S)
+            docker compose -f docker-compose.production.yml up -d
+            ```
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

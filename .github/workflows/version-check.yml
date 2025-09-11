@@ -1,0 +1,161 @@
+name: Version Consistency Check
+
+on:
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'backend/package.json'
+      - 'frontend/package.json'
+      - 'package.json'
+  push:
+    branches: [main, develop]
+    paths:
+      - 'backend/package.json'
+      - 'frontend/package.json'
+      - 'package.json'
+  workflow_dispatch:
+
+jobs:
+  version-check:
+    name: Check Version Consistency
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          
+      - name: Install root dependencies
+        run: npm ci --ignore-scripts
+        
+      - name: Run version consistency check
+        id: version-check
+        run: |
+          echo "Running version consistency check..."
+          node scripts/check-versions.js
+          
+      - name: Display version information
+        run: |
+          echo "=== Version Information ==="
+          echo "Backend Version: $(node -p "require('./backend/package.json').version")"
+          echo "Frontend Version: $(node -p "require('./frontend/package.json').version")"
+          echo "Root Version: $(node -p "require('./package.json').version")"
+          
+      - name: Validate semantic versioning
+        run: |
+          echo "=== Semantic Version Validation ==="
+          BACKEND_VERSION=$(node -p "require('./backend/package.json').version")
+          FRONTEND_VERSION=$(node -p "require('./frontend/package.json').version")
+          ROOT_VERSION=$(node -p "require('./package.json').version")
+          
+          # SemVer regex validation
+          SEMVER_REGEX='^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+(\.[0-9]+)?)?$'
+          
+          if [[ ! $BACKEND_VERSION =~ $SEMVER_REGEX ]]; then
+            echo "❌ Backend version is not valid SemVer: $BACKEND_VERSION"
+            exit 1
+          fi
+          
+          if [[ ! $FRONTEND_VERSION =~ $SEMVER_REGEX ]]; then
+            echo "❌ Frontend version is not valid SemVer: $FRONTEND_VERSION"
+            exit 1
+          fi
+          
+          if [[ ! $ROOT_VERSION =~ $SEMVER_REGEX ]]; then
+            echo "❌ Root version is not valid SemVer: $ROOT_VERSION"
+            exit 1
+          fi
+          
+          echo "✅ All versions follow semantic versioning"
+          
+      - name: Check version synchronization
+        run: |
+          echo "=== Version Synchronization Check ==="
+          BACKEND_VERSION=$(node -p "require('./backend/package.json').version")
+          FRONTEND_VERSION=$(node -p "require('./frontend/package.json').version")
+          ROOT_VERSION=$(node -p "require('./package.json').version")
+          
+          if [ "$BACKEND_VERSION" != "$FRONTEND_VERSION" ]; then
+            echo "❌ Version mismatch between Backend ($BACKEND_VERSION) and Frontend ($FRONTEND_VERSION)"
+            echo "💡 Run: npm run version:sync or ./scripts/release.sh sync-versions"
+            exit 1
+          fi
+          
+          if [ "$ROOT_VERSION" != "$BACKEND_VERSION" ]; then
+            echo "⚠️ Warning: Root version ($ROOT_VERSION) differs from components ($BACKEND_VERSION)"
+          fi
+          
+          echo "✅ Backend and Frontend versions are synchronized: $BACKEND_VERSION"
+          
+      - name: Generate version report
+        if: always()
+        run: |
+          echo "=== Version Consistency Report ===" > version-report.txt
+          echo "Date: $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> version-report.txt
+          echo "Commit: ${{ github.sha }}" >> version-report.txt
+          echo "Branch: ${{ github.ref_name }}" >> version-report.txt
+          echo "" >> version-report.txt
+          echo "Backend Version: $(node -p "require('./backend/package.json').version")" >> version-report.txt
+          echo "Frontend Version: $(node -p "require('./frontend/package.json').version")" >> version-report.txt
+          echo "Root Version: $(node -p "require('./package.json').version")" >> version-report.txt
+          echo "" >> version-report.txt
+          
+          # Detailed check output
+          node scripts/check-versions.js >> version-report.txt 2>&1 || true
+          
+          cat version-report.txt
+          
+      - name: Upload version report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: version-consistency-report
+          path: version-report.txt
+          retention-days: 30
+          
+  changelog-check:
+    name: Check CHANGELOG Update
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          
+      - name: Check if version changed
+        id: version-changed
+        run: |
+          git fetch origin ${{ github.base_ref }}
+          
+          # Check if package.json files were modified
+          BACKEND_CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | grep "backend/package.json" || true)
+          FRONTEND_CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | grep "frontend/package.json" || true)
+          
+          if [[ -n "$BACKEND_CHANGED" || -n "$FRONTEND_CHANGED" ]]; then
+            echo "version_changed=true" >> $GITHUB_OUTPUT
+            echo "Version files were modified in this PR"
+          else
+            echo "version_changed=false" >> $GITHUB_OUTPUT
+            echo "No version files were modified"
+          fi
+          
+      - name: Check CHANGELOG update
+        if: steps.version-changed.outputs.version_changed == 'true'
+        run: |
+          # Check if CHANGELOG.md was updated
+          CHANGELOG_CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD | grep "CHANGELOG.md" || true)
+          
+          if [[ -z "$CHANGELOG_CHANGED" ]]; then
+            echo "⚠️ Warning: Version was updated but CHANGELOG.md was not modified"
+            echo "💡 Please update CHANGELOG.md with the changes in this release"
+            # Note: We don't fail here, just warn
+          else
+            echo "✅ CHANGELOG.md was updated along with version changes"
+          fi
