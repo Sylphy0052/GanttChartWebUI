@@ -1,0 +1,208 @@
+name: E2E Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+    inputs:
+      test_spec:
+        description: 'Specific test spec to run (optional)'
+        required: false
+        type: string
+
+jobs:
+  e2e-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: gantt_user
+          POSTGRES_PASSWORD: gantt_pass
+          POSTGRES_DB: gantt_db_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    env:
+      # Database Configuration
+      POSTGRES_USER: gantt_user
+      POSTGRES_PASSWORD: gantt_pass
+      POSTGRES_DB: gantt_db_test
+      DATABASE_URL: postgresql://gantt_user:gantt_pass@localhost:5432/gantt_db_test?schema=public
+      
+      # Application Configuration
+      NODE_ENV: test
+      BACKEND_PORT: 3001
+      FRONTEND_PORT: 3000
+      
+      # API Configuration
+      NEXT_PUBLIC_API_URL: http://localhost:3001
+      NEXT_PUBLIC_WS_URL: ws://localhost:3001
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+
+      - name: Install Backend Dependencies
+        working-directory: ./backend
+        run: npm ci
+
+      - name: Install Frontend Dependencies
+        working-directory: ./frontend
+        run: npm ci
+
+      - name: Setup Database
+        working-directory: ./backend
+        run: |
+          npx prisma generate
+          npx prisma migrate reset --force --skip-generate
+          npx prisma migrate deploy
+
+      - name: Start Backend Server
+        working-directory: ./backend
+        run: |
+          npm run start:dev &
+          echo $! > backend.pid
+          # Wait for backend to start
+          timeout 60 bash -c 'until curl -f http://localhost:3001/health; do sleep 1; done'
+
+      - name: Build Frontend
+        working-directory: ./frontend
+        run: npm run build
+
+      - name: Start Frontend Server
+        working-directory: ./frontend
+        run: |
+          npm run start &
+          echo $! > frontend.pid
+          # Wait for frontend to start
+          timeout 60 bash -c 'until curl -f http://localhost:3000; do sleep 1; done'
+
+      - name: Run Cypress E2E Tests
+        working-directory: ./frontend
+        run: |
+          if [ -n "${{ github.event.inputs.test_spec }}" ]; then
+            # Run specific test spec
+            npx cypress run --config-file cypress.config.docker.ts \
+              --spec "${{ github.event.inputs.test_spec }}" \
+              --browser chrome --headless \
+              --config baseUrl=http://localhost:3000,env.backendUrl=http://localhost:3001
+          else
+            # Run all tests
+            npx cypress run --config-file cypress.config.docker.ts \
+              --browser chrome --headless \
+              --config baseUrl=http://localhost:3000,env.backendUrl=http://localhost:3001
+          fi
+
+      - name: Upload Cypress Screenshots
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: cypress-screenshots
+          path: frontend/cypress/screenshots
+          retention-days: 7
+
+      - name: Upload Cypress Videos
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cypress-videos
+          path: frontend/cypress/videos
+          retention-days: 7
+
+      - name: Upload Test Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: frontend/cypress/results
+          retention-days: 14
+
+      - name: Generate Test Report
+        if: always()
+        run: |
+          npm install -g junit2html
+          mkdir -p test-reports
+          if [ -d "frontend/cypress/results" ] && [ "$(ls -A frontend/cypress/results)" ]; then
+            junit2html frontend/cypress/results/*.xml --output test-reports/test-report.html
+          else
+            echo "No test results found to generate report"
+          fi
+
+      - name: Upload Test Report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-report
+          path: test-reports/
+          retention-days: 14
+
+      - name: Comment Test Results on PR
+        uses: actions/github-script@v7
+        if: github.event_name == 'pull_request' && always()
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+            
+            // Read test results if available
+            let testResultsComment = '## E2E Test Results\n\n';
+            
+            try {
+              const resultsDir = 'frontend/cypress/results';
+              if (fs.existsSync(resultsDir)) {
+                const files = fs.readdirSync(resultsDir);
+                const xmlFiles = files.filter(f => f.endsWith('.xml'));
+                
+                if (xmlFiles.length > 0) {
+                  testResultsComment += `✅ E2E tests completed\n`;
+                  testResultsComment += `📊 Found ${xmlFiles.length} test result file(s)\n`;
+                  testResultsComment += `📁 Test artifacts are available in the workflow artifacts\n\n`;
+                } else {
+                  testResultsComment += `⚠️ No test results found\n\n`;
+                }
+              } else {
+                testResultsComment += `❌ Test results directory not found\n\n`;
+              }
+            } catch (error) {
+              testResultsComment += `❌ Error reading test results: ${error.message}\n\n`;
+            }
+            
+            testResultsComment += `🔗 [View full workflow run](${context.payload.repository.html_url}/actions/runs/${context.runId})\n`;
+            
+            // Post comment
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: testResultsComment
+            });
+
+      - name: Cleanup
+        if: always()
+        run: |
+          # Stop services
+          if [ -f backend/backend.pid ]; then
+            kill $(cat backend/backend.pid) || true
+          fi
+          if [ -f frontend/frontend.pid ]; then
+            kill $(cat frontend/frontend.pid) || true
+          fi

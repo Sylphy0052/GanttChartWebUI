@@ -1,0 +1,336 @@
+name: Enhanced Quality Gate
+
+on:
+  pull_request:
+    branches: [ main, develop ]
+  push:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+env:
+  NODE_VERSION: '20'
+  POSTGRES_VERSION: '15'
+
+jobs:
+  quality-checks:
+    name: Enhanced Quality Checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    outputs:
+      backend-coverage: ${{ steps.backend-coverage.outputs.coverage }}
+      frontend-coverage: ${{ steps.frontend-coverage.outputs.coverage }}
+      type-check-passed: ${{ steps.type-check.outputs.passed }}
+      lint-passed: ${{ steps.lint-check.outputs.passed }}
+      test-passed: ${{ steps.test-results.outputs.passed }}
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: gantt_user
+          POSTGRES_PASSWORD: gantt_pass
+          POSTGRES_DB: gantt_db_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    env:
+      DATABASE_URL: postgresql://gantt_user:gantt_pass@localhost:5432/gantt_db_test?schema=public
+      NODE_ENV: test
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+
+      - name: Install Backend Dependencies
+        working-directory: ./backend
+        run: npm ci
+
+      - name: Install Frontend Dependencies
+        working-directory: ./frontend
+        run: npm ci
+
+      - name: Setup Database
+        working-directory: ./backend
+        run: |
+          npx prisma generate
+          npx prisma migrate reset --force --skip-generate
+          npx prisma migrate deploy
+
+      - name: TypeScript Type Check (Backend)
+        id: backend-typecheck
+        working-directory: ./backend
+        run: |
+          echo "🔍 Running Backend TypeScript type check..."
+          if npx tsc --noEmit --skipLibCheck; then
+            echo "✅ Backend TypeScript check passed"
+            echo "backend=true" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Backend TypeScript check failed"
+            echo "backend=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+      - name: TypeScript Type Check (Frontend)
+        id: frontend-typecheck
+        working-directory: ./frontend
+        run: |
+          echo "🔍 Running Frontend TypeScript type check..."
+          if npx tsc --noEmit; then
+            echo "✅ Frontend TypeScript check passed"
+            echo "frontend=true" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Frontend TypeScript check failed"
+            echo "frontend=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+      - name: Set Type Check Results
+        id: type-check
+        run: |
+          BACKEND_RESULT="${{ steps.backend-typecheck.outputs.backend }}"
+          FRONTEND_RESULT="${{ steps.frontend-typecheck.outputs.frontend }}"
+          
+          if [[ "$BACKEND_RESULT" == "true" && "$FRONTEND_RESULT" == "true" ]]; then
+            echo "passed=true" >> $GITHUB_OUTPUT
+            echo "✅ All TypeScript checks passed"
+          else
+            echo "passed=false" >> $GITHUB_OUTPUT
+            echo "❌ TypeScript checks failed"
+            exit 1
+          fi
+
+      - name: Backend Lint Check
+        id: backend-lint
+        working-directory: ./backend
+        run: |
+          echo "🧹 Running Backend linting..."
+          if npm run lint; then
+            echo "✅ Backend lint passed"
+            echo "backend=true" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Backend lint failed"
+            echo "backend=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+      - name: Frontend Lint Check
+        id: frontend-lint
+        working-directory: ./frontend
+        run: |
+          echo "🧹 Running Frontend linting..."
+          if npm run lint; then
+            echo "✅ Frontend lint passed"
+            echo "frontend=true" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Frontend lint failed"
+            echo "frontend=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+
+      - name: Set Lint Check Results
+        id: lint-check
+        run: |
+          BACKEND_RESULT="${{ steps.backend-lint.outputs.backend }}"
+          FRONTEND_RESULT="${{ steps.frontend-lint.outputs.frontend }}"
+          
+          if [[ "$BACKEND_RESULT" == "true" && "$FRONTEND_RESULT" == "true" ]]; then
+            echo "passed=true" >> $GITHUB_OUTPUT
+            echo "✅ All lint checks passed"
+          else
+            echo "passed=false" >> $GITHUB_OUTPUT
+            echo "❌ Lint checks failed"
+            exit 1
+          fi
+
+      - name: Backend Unit Tests with Coverage
+        id: backend-tests
+        working-directory: ./backend
+        run: |
+          echo "🧪 Running Backend unit tests with coverage..."
+          npm run test:cov
+          echo "passed=true" >> $GITHUB_OUTPUT
+
+      - name: Extract Backend Coverage
+        id: backend-coverage
+        working-directory: ./backend
+        run: |
+          if [ -f coverage/coverage-summary.json ]; then
+            COVERAGE=$(node -p "Math.round(JSON.parse(require('fs').readFileSync('coverage/coverage-summary.json')).total.lines.pct)")
+            echo "coverage=$COVERAGE" >> $GITHUB_OUTPUT
+            echo "📊 Backend Coverage: ${COVERAGE}%"
+            
+            if [ $COVERAGE -ge 80 ]; then
+              echo "✅ Backend coverage requirement met: ${COVERAGE}% >= 80%"
+            else
+              echo "❌ Backend coverage requirement not met: ${COVERAGE}% < 80%"
+              exit 1
+            fi
+          else
+            echo "❌ Backend coverage report not found"
+            exit 1
+          fi
+
+      - name: Frontend Unit Tests with Coverage
+        id: frontend-tests
+        working-directory: ./frontend
+        run: |
+          echo "🧪 Running Frontend unit tests with coverage..."
+          # Create a basic coverage report for frontend
+          npm run test -- --coverage --watchAll=false --passWithNoTests
+          echo "passed=true" >> $GITHUB_OUTPUT
+
+      - name: Extract Frontend Coverage
+        id: frontend-coverage
+        working-directory: ./frontend
+        run: |
+          if [ -f coverage/coverage-summary.json ]; then
+            COVERAGE=$(node -p "Math.round(JSON.parse(require('fs').readFileSync('coverage/coverage-summary.json')).total.lines.pct)")
+            echo "coverage=$COVERAGE" >> $GITHUB_OUTPUT
+            echo "📊 Frontend Coverage: ${COVERAGE}%"
+          else
+            echo "📊 Frontend Coverage: N/A (no tests configured)"
+            echo "coverage=0" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Backend E2E Tests
+        id: backend-e2e
+        working-directory: ./backend
+        run: |
+          echo "🚀 Running Backend E2E tests..."
+          npm run test:e2e
+          echo "passed=true" >> $GITHUB_OUTPUT
+
+      - name: Set Test Results
+        id: test-results
+        run: |
+          echo "passed=true" >> $GITHUB_OUTPUT
+          echo "✅ All tests passed"
+
+      - name: Build Applications
+        run: |
+          echo "🏗️ Building applications..."
+          # Backend build
+          cd backend && npm run build
+          # Frontend build  
+          cd ../frontend && npm run build
+          echo "✅ Build successful"
+
+      - name: Upload Coverage Reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-reports
+          path: |
+            backend/coverage/
+            frontend/coverage/
+          retention-days: 30
+
+      - name: Generate Quality Badge Data
+        id: badge-data
+        run: |
+          BACKEND_COV="${{ steps.backend-coverage.outputs.coverage }}"
+          FRONTEND_COV="${{ steps.frontend-coverage.outputs.coverage }}"
+          
+          # Create badge data
+          mkdir -p quality-reports
+          
+          echo "{
+            \"schemaVersion\": 1,
+            \"label\": \"backend coverage\",
+            \"message\": \"${BACKEND_COV}%\",
+            \"color\": \"$([ $BACKEND_COV -ge 80 ] && echo 'brightgreen' || echo 'red')\"
+          }" > quality-reports/backend-coverage-badge.json
+          
+          echo "{
+            \"schemaVersion\": 1,
+            \"label\": \"type check\",
+            \"message\": \"${{ steps.type-check.outputs.passed == 'true' && 'passing' || 'failing' }}\",
+            \"color\": \"${{ steps.type-check.outputs.passed == 'true' && 'brightgreen' || 'red' }}\"
+          }" > quality-reports/typecheck-badge.json
+
+      - name: Upload Quality Reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: quality-reports
+          path: quality-reports/
+          retention-days: 30
+
+  pr-quality-comment:
+    name: PR Quality Comment
+    runs-on: ubuntu-latest
+    needs: quality-checks
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Generate Quality Report Comment
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const backendCoverage = '${{ needs.quality-checks.outputs.backend-coverage }}';
+            const frontendCoverage = '${{ needs.quality-checks.outputs.frontend-coverage }}';
+            const typeCheckPassed = '${{ needs.quality-checks.outputs.type-check-passed }}' === 'true';
+            const lintPassed = '${{ needs.quality-checks.outputs.lint-passed }}' === 'true';
+            const testPassed = '${{ needs.quality-checks.outputs.test-passed }}' === 'true';
+            
+            let comment = '## 📊 Quality Gate Report\n\n';
+            
+            // Status table
+            comment += '| Check | Status | Details |\n';
+            comment += '|-------|--------|----------|\n';
+            comment += `| TypeScript | ${typeCheckPassed ? '✅ Passed' : '❌ Failed'} | Type checking |\n`;
+            comment += `| Linting | ${lintPassed ? '✅ Passed' : '❌ Failed'} | Code style |\n`;
+            comment += `| Tests | ${testPassed ? '✅ Passed' : '❌ Failed'} | Unit + E2E tests |\n`;
+            comment += `| Backend Coverage | ${backendCoverage >= 80 ? '✅' : '❌'} ${backendCoverage}% | Requirement: ≥80% |\n`;
+            comment += `| Frontend Coverage | 📊 ${frontendCoverage}% | Info only |\n\n`;
+            
+            // Overall status
+            const allPassed = typeCheckPassed && lintPassed && testPassed && backendCoverage >= 80;
+            
+            if (allPassed) {
+              comment += '✅ **All quality checks passed!** This PR meets quality standards.\n\n';
+            } else {
+              comment += '⚠️ **Some quality checks failed.** Please address issues before merging.\n\n';
+            }
+            
+            comment += '📈 Detailed reports: [View workflow artifacts]';
+            comment += `(${{ github.event.repository.html_url }}/actions/runs/${{ github.run_id }})\n`;
+            
+            // Create or update comment
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            
+            const existingComment = comments.find(comment => 
+              comment.body.includes('📊 Quality Gate Report')
+            );
+            
+            if (existingComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existingComment.id,
+                body: comment
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: comment
+              });
+            }
