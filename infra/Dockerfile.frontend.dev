@@ -1,53 +1,49 @@
-FROM node:20-alpine
+FROM node:20-alpine AS base
 
-# Check https://github.com/nodejs/docker-node/tree/b4117f9333da4138b03a546ec926ef50a31506c3#nodealpine to understand why libc6-compat might be needed.
-# Cypress dependencies for E2E testing (Alpine Linux packages)
-# See: https://docs.cypress.io/guides/continuous-integration/introduction#Dependencies
-RUN apk add --no-cache \
-    libc6-compat \
-    xvfb \
-    gtk+3.0 \
-    gtk+3.0-dev \
-    libnotify \
-    nss \
-    alsa-lib \
-    xauth \
-    dbus \
-    font-noto-emoji \
-    eudev \
-    eudev-dev \
-    gcompat \
-    libstdc++ \
-    bash \
-    ca-certificates \
-    chromium \
-    chromium-chromedriver \
-    firefox \
-    wget
-
+# Install dependencies only when needed
+FROM base AS deps
+# Add libc compatibility for Alpine
+RUN apk add --no-cache libc6-compat curl
 WORKDIR /app
 
+# Copy package files
+COPY package.json package-lock.json* ./
+
 # Install dependencies
-COPY package.json yarn.lock* package-lock.json* pnpm-lock.yaml* ./
+RUN npm ci
 
-RUN \
-  if [ -f yarn.lock ]; then yarn --frozen-lockfile; \
-  elif [ -f package-lock.json ]; then npm ci; \
-  elif [ -f pnpm-lock.yaml ]; then corepack enable pnpm && pnpm i --frozen-lockfile; \
-  else echo "Lockfile not found." && exit 1; \
-  fi
+# Development image
+FROM base AS dev
+WORKDIR /app
 
-# Next.js collects completely anonymous telemetry data about general usage.
-ENV NEXT_TELEMETRY_DISABLED=1
+# Install curl for healthchecks
+RUN apk add --no-cache curl
+
+# Copy dependencies
+COPY --from=deps /app/node_modules ./node_modules
+
+# Copy source code (this will be overridden by volume mount in docker-compose)
+COPY . .
+
+# Set environment
 ENV NODE_ENV=development
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV PORT=3000
 
-# Cypress environment variables for Alpine Linux
-ENV CYPRESS_CACHE_FOLDER=/root/.cache/Cypress
-ENV DISPLAY=:0
-ENV CHROME_BIN=/usr/bin/chromium-browser
-ENV CHROME_PATH=/usr/bin/chromium-browser
+# Create non-root user
+RUN addgroup --system --gid 1001 nodejs
+RUN adduser --system --uid 1001 nextjs
 
+# Set ownership for the app directory
+RUN chown -R nextjs:nodejs /app
+USER nextjs
+
+# Expose port
 EXPOSE 3000
 
-# 開発モードで起動（ボリュームマウントされたコードを使用）
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+  CMD curl -f http://localhost:3000 || exit 1
+
+# Start development server
 CMD ["npm", "run", "dev"]

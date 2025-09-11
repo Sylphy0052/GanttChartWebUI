@@ -1,0 +1,162 @@
+# Alertmanager Configuration for GanttChart WebUI
+# アラート通知設定: 重要度別・チャンネル別
+
+global:
+  # SMTP設定（メール通知用）
+  smtp_smarthost: 'localhost:587'
+  smtp_from: 'gantt-alerts@example.com'
+  smtp_auth_username: ''
+  smtp_auth_password: ''
+  smtp_require_tls: false
+
+# アラート通知テンプレート
+templates:
+  - '/etc/alertmanager/templates/*.tmpl'
+
+# ルーティング設定
+route:
+  group_by: ['alertname', 'severity', 'component']
+  group_wait: 30s      # 初回アラート待機時間
+  group_interval: 5m   # グループ内アラート間隔
+  repeat_interval: 12h # 同一アラート再送間隔
+  receiver: 'default-receiver'
+  
+  # 重要度・コンポーネント別ルーティング
+  routes:
+    # クリティカルアラート（即座に通知）
+    - match:
+        severity: critical
+      receiver: 'critical-alerts'
+      group_wait: 10s
+      group_interval: 2m
+      repeat_interval: 30m
+
+    # システムアラート
+    - match:
+        component: system
+      receiver: 'system-alerts'
+      group_wait: 1m
+      group_interval: 10m
+
+    # アプリケーションアラート
+    - match:
+        component: application
+      receiver: 'application-alerts'
+      group_wait: 30s
+      group_interval: 5m
+
+    # データベースアラート
+    - match:
+        component: database
+      receiver: 'database-alerts'
+      group_wait: 30s
+      group_interval: 5m
+
+    # ビジネスメトリクスアラート
+    - match:
+        component: business
+      receiver: 'business-alerts'
+      group_wait: 2m
+      group_interval: 30m
+
+# 通知先設定
+receivers:
+  # デフォルト通知先
+  - name: 'default-receiver'
+    webhook_configs:
+      - url: 'http://localhost:9093/api/v1/alerts'
+        send_resolved: true
+
+  # クリティカルアラート通知先
+  - name: 'critical-alerts'
+    email_configs:
+      - to: 'admin@example.com'
+        subject: '[CRITICAL] GanttChart WebUI Alert'
+        body: |
+          {{ range .Alerts }}
+          Alert: {{ .Annotations.summary }}
+          Description: {{ .Annotations.description }}
+          Severity: {{ .Labels.severity }}
+          Component: {{ .Labels.component }}
+          Starts: {{ .StartsAt }}
+          {{ end }}
+        headers:
+          Priority: 'urgent'
+    
+    # Slack通知（設定例）
+    # slack_configs:
+    #   - api_url: 'https://hooks.slack.com/services/YOUR/SLACK/WEBHOOK'
+    #     channel: '#alerts-critical'
+    #     title: 'GanttChart WebUI Critical Alert'
+    #     text: '{{ range .Alerts }}{{ .Annotations.summary }}{{ end }}'
+    #     send_resolved: true
+
+  # システムアラート通知先
+  - name: 'system-alerts'
+    email_configs:
+      - to: 'system-admin@example.com'
+        subject: '[SYSTEM] GanttChart WebUI System Alert'
+        body: |
+          System Alert Detected:
+          {{ range .Alerts }}
+          - {{ .Annotations.summary }}
+          {{ end }}
+
+  # アプリケーションアラート通知先
+  - name: 'application-alerts'
+    email_configs:
+      - to: 'dev-team@example.com'
+        subject: '[APP] GanttChart WebUI Application Alert'
+        body: |
+          Application Alert:
+          {{ range .Alerts }}
+          - {{ .Annotations.summary }}
+          - {{ .Annotations.description }}
+          {{ end }}
+
+  # データベースアラート通知先
+  - name: 'database-alerts'
+    email_configs:
+      - to: 'db-admin@example.com'
+        subject: '[DB] GanttChart WebUI Database Alert'
+        body: |
+          Database Alert:
+          {{ range .Alerts }}
+          - {{ .Annotations.summary }}
+          - {{ .Annotations.description }}
+          {{ end }}
+
+  # ビジネスメトリクスアラート通知先
+  - name: 'business-alerts'
+    email_configs:
+      - to: 'business-team@example.com'
+        subject: '[BUSINESS] GanttChart WebUI Business Metrics Alert'
+        body: |
+          Business Metrics Alert:
+          {{ range .Alerts }}
+          - {{ .Annotations.summary }}
+          - {{ .Annotations.description }}
+          {{ end }}
+
+# アラート抑制設定
+inhibit_rules:
+  # システムダウン時は他のアラートを抑制
+  - source_match:
+      alertname: 'ApplicationDown'
+    target_match_re:
+      alertname: 'High.*|Critical.*'
+    equal: ['instance']
+
+  # クリティカルアラート発生時は警告レベルを抑制
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['alertname', 'instance', 'component']
+
+  # データベースダウン時はアプリケーションエラーを抑制
+  - source_match:
+      alertname: 'DatabaseDown'
+    target_match_re:
+      alertname: 'HighErrorRate|CriticalErrorRate'
+    equal: ['instance']

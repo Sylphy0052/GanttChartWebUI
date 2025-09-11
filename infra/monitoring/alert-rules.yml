@@ -1,0 +1,222 @@
+# Prometheus Alert Rules for GanttChart WebUI
+# アラートルール定義: システム・アプリケーション・ビジネスメトリクス
+
+groups:
+  # システムリソースアラート
+  - name: system-alerts
+    rules:
+      # CPU使用率アラート
+      - alert: HighCpuUsage
+        expr: (100 - (avg by (instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)) > 80
+        for: 2m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "高CPU使用率が検出されました"
+          description: "インスタンス {{ $labels.instance }} のCPU使用率が {{ $value }}% です（2分間継続）"
+
+      - alert: CriticalCpuUsage
+        expr: (100 - (avg by (instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)) > 95
+        for: 1m
+        labels:
+          severity: critical
+          component: system
+        annotations:
+          summary: "クリティカルCPU使用率が検出されました"
+          description: "インスタンス {{ $labels.instance }} のCPU使用率が {{ $value }}% です（1分間継続）"
+
+      # メモリ使用率アラート
+      - alert: HighMemoryUsage
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+        for: 2m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "高メモリ使用率が検出されました"
+          description: "インスタンス {{ $labels.instance }} のメモリ使用率が {{ $value }}% です"
+
+      - alert: CriticalMemoryUsage
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 95
+        for: 1m
+        labels:
+          severity: critical
+          component: system
+        annotations:
+          summary: "クリティカルメモリ使用率が検出されました"
+          description: "インスタンス {{ $labels.instance }} のメモリ使用率が {{ $value }}% です"
+
+      # ディスク使用率アラート
+      - alert: HighDiskUsage
+        expr: (1 - (node_filesystem_avail_bytes{fstype!="tmpfs"} / node_filesystem_size_bytes{fstype!="tmpfs"})) * 100 > 85
+        for: 2m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "高ディスク使用率が検出されました"
+          description: "インスタンス {{ $labels.instance }} のディスク使用率が {{ $value }}% です（マウントポイント: {{ $labels.mountpoint }}）"
+
+      - alert: CriticalDiskUsage
+        expr: (1 - (node_filesystem_avail_bytes{fstype!="tmpfs"} / node_filesystem_size_bytes{fstype!="tmpfs"})) * 100 > 95
+        for: 1m
+        labels:
+          severity: critical
+          component: system
+        annotations:
+          summary: "クリティカルディスク使用率が検出されました"
+          description: "インスタンス {{ $labels.instance }} のディスク使用率が {{ $value }}% です（マウントポイント: {{ $labels.mountpoint }}）"
+
+  # アプリケーションアラート
+  - name: application-alerts
+    rules:
+      # アプリケーションダウンアラート
+      - alert: ApplicationDown
+        expr: up{job="gantt-backend"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: application
+        annotations:
+          summary: "GanttChart Backendアプリケーションがダウンしています"
+          description: "インスタンス {{ $labels.instance }} が1分間応答していません"
+
+      # 高レスポンス時間アラート
+      - alert: HighResponseTime
+        expr: avg(http_request_duration_seconds{job="gantt-backend"}) > 1.0
+        for: 2m
+        labels:
+          severity: warning
+          component: application
+        annotations:
+          summary: "高レスポンス時間が検出されました"
+          description: "平均レスポンス時間が {{ $value }} 秒です（2分間継続）"
+
+      - alert: CriticalResponseTime
+        expr: avg(http_request_duration_seconds{job="gantt-backend"}) > 3.0
+        for: 1m
+        labels:
+          severity: critical
+          component: application
+        annotations:
+          summary: "クリティカルレスポンス時間が検出されました"
+          description: "平均レスポンス時間が {{ $value }} 秒です（1分間継続）"
+
+      # 高エラー率アラート
+      - alert: HighErrorRate
+        expr: (rate(http_requests_total{status_code=~"5.."}[5m]) / rate(http_requests_total[5m])) * 100 > 5
+        for: 2m
+        labels:
+          severity: warning
+          component: application
+        annotations:
+          summary: "高エラー率が検出されました"
+          description: "5分間のエラー率が {{ $value }}% です"
+
+      - alert: CriticalErrorRate
+        expr: (rate(http_requests_total{status_code=~"5.."}[5m]) / rate(http_requests_total[5m])) * 100 > 15
+        for: 1m
+        labels:
+          severity: critical
+          component: application
+        annotations:
+          summary: "クリティカルエラー率が検出されました"
+          description: "5分間のエラー率が {{ $value }}% です"
+
+      # Node.jsメモリリークアラート
+      - alert: NodeJsMemoryLeak
+        expr: nodejs_memory_heap_used_bytes > 500000000  # 500MB
+        for: 5m
+        labels:
+          severity: warning
+          component: application
+        annotations:
+          summary: "Node.jsメモリ使用量が高い状態が継続しています"
+          description: "ヒープメモリ使用量が {{ $value | humanize1024 }}B です（5分間継続）"
+
+  # データベースアラート
+  - name: database-alerts
+    rules:
+      # データベース接続アラート
+      - alert: DatabaseDown
+        expr: pg_up == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: database
+        annotations:
+          summary: "PostgreSQLデータベースがダウンしています"
+          description: "データベースインスタンス {{ $labels.instance }} が応答していません"
+
+      # 高データベースレスポンス時間
+      - alert: HighDatabaseResponseTime
+        expr: avg(database_operation_duration_seconds) > 0.5
+        for: 2m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "データベースレスポンス時間が高い状態です"
+          description: "平均データベースレスポンス時間が {{ $value }} 秒です"
+
+      # データベース接続数アラート
+      - alert: HighDatabaseConnections
+        expr: pg_stat_activity_count > 80
+        for: 2m
+        labels:
+          severity: warning
+          component: database
+        annotations:
+          summary: "データベース接続数が高い状態です"
+          description: "アクティブな接続数が {{ $value }} です"
+
+  # ビジネスメトリクスアラート
+  - name: business-alerts
+    rules:
+      # WebSocket接続数異常
+      - alert: HighWebSocketConnections
+        expr: websocket_connections_active > 100
+        for: 5m
+        labels:
+          severity: warning
+          component: websocket
+        annotations:
+          summary: "WebSocket接続数が異常に高い状態です"
+          description: "アクティブなWebSocket接続数が {{ $value }} です（5分間継続）"
+
+      # プロジェクト数の急激な変化
+      - alert: ProjectCountDropped
+        expr: decrease(gantt_projects_total[30m]) > 10
+        for: 1m
+        labels:
+          severity: warning
+          component: business
+        annotations:
+          summary: "プロジェクト数の急激な減少が検出されました"
+          description: "30分間でプロジェクト数が {{ $value }} 減少しました"
+
+  # ヘルスチェックアラート
+  - name: health-alerts
+    rules:
+      # 詳細ヘルスチェック失敗
+      - alert: DetailedHealthCheckFailed
+        expr: gantt_health_status != 1
+        for: 2m
+        labels:
+          severity: warning
+          component: health
+        annotations:
+          summary: "詳細ヘルスチェックが失敗しました"
+          description: "ヘルスチェックステータスが異常です（2分間継続）"
+
+      # ファイルシステム健全性
+      - alert: FilesystemHealthIssue
+        expr: gantt_filesystem_writable != 1
+        for: 1m
+        labels:
+          severity: critical
+          component: filesystem
+        annotations:
+          summary: "ファイルシステムの書き込みに問題があります"
+          description: "必要なディレクトリへの書き込みができません"

@@ -1,0 +1,87 @@
+# Prometheus Configuration for GanttChart WebUI
+# 監視対象: Backend API, Frontend, システムメトリクス
+
+global:
+  scrape_interval: 15s # デフォルトスクレイプ間隔
+  evaluation_interval: 15s # ルール評価間隔
+  external_labels:
+    environment: 'production'
+    service: 'gantt-webui'
+
+# ルールファイルの設定
+rule_files:
+  - "alert-rules.yml"
+
+# Alertmanager設定
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          - alertmanager:9093
+
+# スクレイプ設定
+scrape_configs:
+  # Prometheus自体の監視
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+    scrape_interval: 30s
+    metrics_path: /metrics
+
+  # GanttChart Backend API監視
+  - job_name: 'gantt-backend'
+    static_configs:
+      - targets: ['backend:3001']
+    scrape_interval: 10s
+    metrics_path: /metrics
+    scrape_timeout: 5s
+    honor_labels: true
+    params:
+      format: ['prometheus']
+
+  # GanttChart ヘルスチェック監視 (Updated: metrics endpoint)
+  - job_name: 'gantt-health'
+    static_configs:
+      - targets: ['backend:3001']
+    scrape_interval: 30s
+    metrics_path: /health/metrics
+    scrape_timeout: 10s
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: 'gantt_.*'
+        target_label: __name__
+        replacement: '${1}'
+
+  # Node Exporter（システムメトリクス）
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+    scrape_interval: 15s
+    metrics_path: /metrics
+
+  # PostgreSQL Exporter（データベースメトリクス）
+  - job_name: 'postgres-exporter'
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+    scrape_interval: 15s
+    metrics_path: /metrics
+
+  # cAdvisor（コンテナメトリクス）
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+    scrape_interval: 15s
+    metrics_path: /metrics
+
+# 保存設定
+storage:
+  tsdb:
+    retention.time: 30d # 30日間保存
+    retention.size: 10GB # 最大10GB
+    wal-compression: true
+
+# リモート書き込み設定（必要に応じて）
+# remote_write:
+#   - url: "https://prometheus-remote-write-endpoint"
+#     headers:
+#       authorization: "Bearer <token>"

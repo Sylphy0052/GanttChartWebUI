@@ -1,0 +1,322 @@
+# ====================
+# GanttChart WebUI - Production Docker Compose Configuration
+# ====================
+# プロダクション環境向け最適化設定
+# セキュリティ、パフォーマンス、運用性を重視した構成
+
+version: '3.8'
+
+services:
+  # ====================
+  # PostgreSQL Database - Production Optimized
+  # ====================
+  postgres:
+    image: postgres:15-alpine
+    container_name: gantt_postgres_prod
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      # PostgreSQL性能最適化設定
+      POSTGRES_INITDB_ARGS: "--auth-host=md5"
+      # 接続設定
+      POSTGRES_MAX_CONNECTIONS: 200
+      POSTGRES_SHARED_BUFFERS: 256MB
+      POSTGRES_EFFECTIVE_CACHE_SIZE: 1GB
+    volumes:
+      # 永続化データ（本番用命名）
+      - postgres_prod_data:/var/lib/postgresql/data:Z
+      # PostgreSQL設定最適化
+      - ./postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      # 初期化SQL（必要に応じて）
+      - ./postgres/init-scripts:/docker-entrypoint-initdb.d:ro
+    networks:
+      - gantt-prod-network
+    # リソース制限設定
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    # 強化されたヘルスチェック
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB} -h localhost"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    # セキュリティ設定
+    security_opt:
+      - no-new-privileges:true
+    # 自動復旧設定
+    restart: unless-stopped
+    # ログ設定
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "3"
+        labels: "service=postgres,environment=production"
+
+  # ====================
+  # Backend API - Production Optimized
+  # ====================
+  backend:
+    build:
+      context: ../backend
+      dockerfile: ../infra/Dockerfile.backend.production
+      # ビルド最適化
+      args:
+        NODE_ENV: production
+    container_name: gantt_backend_prod
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      NODE_ENV: production
+      PORT: ${BACKEND_PORT}
+      # パフォーマンス設定
+      NODE_OPTIONS: "--max-old-space-size=${NODE_MAX_OLD_SPACE_SIZE:-2048}"
+      # セキュリティ設定
+      AUTH_TYPE: ${AUTH_TYPE}
+      JWT_SECRET: ${JWT_SECRET}
+      SESSION_SECRET: ${SESSION_SECRET}
+      # ログ設定
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    volumes:
+      # アップロードファイル（読み書き権限制限）
+      - uploads_prod_data:/app/uploads:rw,Z
+      # ログファイル
+      - logs_prod_data:/app/logs:rw,Z
+      # 一時ファイル（メモリマウント）
+      - type: tmpfs
+        target: /tmp
+        tmpfs:
+          size: 100m
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - gantt-prod-network
+    # リソース制限設定
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 2G
+        reservations:
+          cpus: '0.3'
+          memory: 256M
+      # 複数インスタンス対応（負荷分散時）
+      replicas: 1
+    # 強化されたヘルスチェック
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${BACKEND_PORT}/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    # セキュリティ設定
+    security_opt:
+      - no-new-privileges:true
+    user: "nestjs:nodejs"  # 非rootユーザーで実行（最適化Dockerfileに合わせて更新）
+    # 自動復旧設定
+    restart: unless-stopped
+    # ログ設定
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+        labels: "service=backend,environment=production"
+
+  # ====================
+  # Frontend - Production Optimized
+  # ====================
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: ../infra/Dockerfile.frontend.production
+      # ビルド最適化
+      args:
+        NODE_ENV: production
+    container_name: gantt_frontend_prod
+    environment:
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL}
+      NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL}
+      NODE_ENV: production
+      # Next.js最適化設定
+      NEXT_TELEMETRY_DISABLED: 1
+      NODE_OPTIONS: "--max-old-space-size=1024"
+      PORT: 3000
+      HOSTNAME: "0.0.0.0"
+    networks:
+      - gantt-prod-network
+    depends_on:
+      backend:
+        condition: service_healthy
+    # リソース制限設定
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.2'
+          memory: 128M
+    # ヘルスチェック
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    # セキュリティ設定
+    security_opt:
+      - no-new-privileges:true
+    user: "nextjs:nodejs"  # 非rootユーザーで実行（最適化Dockerfileに合わせて更新）
+    # 自動復旧設定
+    restart: unless-stopped
+    # ログ設定
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+        labels: "service=frontend,environment=production"
+
+  # ====================
+  # Nginx Reverse Proxy - Production Optimized
+  # ====================
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: gantt_nginx_prod
+    ports:
+      # HTTP (リダイレクト用)
+      - "${NGINX_PORT:-80}:80"
+      # HTTPS (SSL終端)
+      - "${NGINX_HTTPS_PORT:-443}:443"
+    volumes:
+      # 最適化されたNginx設定
+      - ./nginx/nginx.production.conf:/etc/nginx/nginx.conf:ro
+      # SSL証明書（Let's Encrypt等）
+      - ./ssl/certs:/etc/ssl/certs:ro
+      - ./ssl/private:/etc/ssl/private:ro
+      # ログディレクトリ
+      - nginx_logs_prod:/var/log/nginx:rw
+      # キャッシュディレクトリ
+      - nginx_cache_prod:/var/cache/nginx:rw
+      # 一時ファイル
+      - type: tmpfs
+        target: /tmp
+        tmpfs:
+          size: 100m
+    depends_on:
+      backend:
+        condition: service_healthy
+      frontend:
+        condition: service_healthy
+    networks:
+      - gantt-prod-network
+    # リソース制限設定
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+    # ヘルスチェック
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    # セキュリティ設定
+    security_opt:
+      - no-new-privileges:true
+    # 自動復旧設定
+    restart: unless-stopped
+    # ログ設定
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100m"
+        max-file: "5"
+        labels: "service=nginx,environment=production"
+
+  # ====================
+  # Log Aggregation & Monitoring (Optional)
+  # ====================
+  # 本番環境では外部ログ集約システム（ELK Stack, Fluentd等）の使用を推奨
+  # watchtower:
+  #   image: containrrr/watchtower
+  #   container_name: gantt_watchtower_prod
+  #   volumes:
+  #     - /var/run/docker.sock:/var/run/docker.sock
+  #   environment:
+  #     WATCHTOWER_CLEANUP: "true"
+  #     WATCHTOWER_POLL_INTERVAL: 3600
+  #     WATCHTOWER_INCLUDE_STOPPED: "true"
+  #   restart: unless-stopped
+
+# ====================
+# Volumes - Production Data Persistence
+# ====================
+volumes:
+  # PostgreSQLデータ（バックアップ対象）
+  postgres_prod_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/gantt/data/postgres
+  
+  # アップロードファイル（バックアップ対象）
+  uploads_prod_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/gantt/data/uploads
+  
+  # ログファイル
+  logs_prod_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/gantt/logs
+  
+  # Nginxログ
+  nginx_logs_prod:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /opt/gantt/logs/nginx
+  
+  # Nginxキャッシュ
+  nginx_cache_prod:
+    driver: local
+
+# ====================
+# Networks - Production Security
+# ====================
+networks:
+  gantt-prod-network:
+    driver: bridge
+    driver_opts:
+      # ネットワーク分離強化
+      com.docker.network.bridge.name: gantt-prod
+      com.docker.network.bridge.enable_icc: "true"
+      com.docker.network.bridge.enable_ip_masquerade: "true"
+    ipam:
+      driver: default
+      config:
+        # プライベートIPレンジ
+        - subnet: 172.20.0.0/16
+          gateway: 172.20.0.1

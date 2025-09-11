@@ -1,0 +1,119 @@
+# ====================
+# GanttChart WebUI - Frontend Production Dockerfile
+# ====================
+# Production-optimized multi-stage build
+# Features: Alpine Linux, non-root user, production build optimization
+
+FROM node:20-alpine AS base
+
+# Install only essential system dependencies
+RUN apk add --no-cache \
+    libc6-compat \
+    && rm -rf /var/cache/apk/* \
+    && rm -rf /tmp/*
+
+WORKDIR /app
+
+# ====================
+# Dependencies Stage
+# ====================
+FROM base AS deps
+
+# Copy only package files for better layer caching
+COPY package.json package-lock.json* ./
+
+# Install dependencies with production optimizations
+RUN npm ci --legacy-peer-deps --only=production --ignore-scripts \
+    && npm cache clean --force
+
+# ====================
+# Build Dependencies Stage
+# ====================
+FROM base AS build-deps
+
+# Copy package files
+COPY package.json package-lock.json* ./
+
+# Install all dependencies including dev dependencies
+RUN npm ci --legacy-peer-deps --ignore-scripts \
+    && npm cache clean --force
+
+# ====================
+# Builder Stage
+# ====================
+FROM base AS builder
+
+# Copy all dependencies from build-deps stage
+COPY --from=build-deps /app/node_modules ./node_modules
+
+# Copy source code
+COPY . .
+
+# Set build environment variables
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+
+# Build the application
+RUN npm run build
+
+# ====================
+# Production Runtime Stage
+# ====================
+FROM base AS production
+
+# Install runtime dependencies only
+RUN apk add --no-cache \
+    curl \
+    dumb-init \
+    && rm -rf /var/cache/apk/* \
+    && rm -rf /tmp/*
+
+# Create non-root user with specific UID/GID for security
+RUN addgroup --system --gid 1001 nodejs \
+    && adduser --system --uid 1001 --ingroup nodejs nextjs
+
+# Copy production dependencies from deps stage
+COPY --from=deps --chown=nextjs:nodejs /app/node_modules ./node_modules
+
+# Copy built application from builder stage
+COPY --from=builder --chown=nextjs:nodejs /app/.next ./.next
+COPY --from=builder --chown=nextjs:nodejs /app/public ./public
+COPY --from=builder --chown=nextjs:nodejs /app/package*.json ./
+COPY --from=builder --chown=nextjs:nodejs /app/next.config.js ./
+
+# Create necessary directories with proper permissions
+RUN mkdir -p /app/.next/cache \
+    && chown -R nextjs:nodejs /app
+
+# Switch to non-root user
+USER nextjs
+
+# Set production environment variables
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV PORT=3000
+ENV HOSTNAME="0.0.0.0"
+
+# Expose port
+EXPOSE 3000
+
+# Add health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:3000/health || exit 1
+
+# Use dumb-init for proper signal handling
+ENTRYPOINT ["dumb-init", "--"]
+
+# Start production server
+CMD ["npm", "start"]
+
+# ====================
+# Image Metadata
+# ====================
+LABEL maintainer="GanttChart WebUI Team"
+LABEL description="GanttChart WebUI Frontend - Production Optimized Multi-stage Build"
+LABEL version="1.0.0"
+LABEL org.opencontainers.image.title="GanttChart Frontend Production"
+LABEL org.opencontainers.image.description="Next.js 15 + React 19 + TypeScript frontend optimized for production with multi-stage build"
+LABEL org.opencontainers.image.vendor="GanttChart WebUI"
+LABEL org.opencontainers.image.licenses="MIT"

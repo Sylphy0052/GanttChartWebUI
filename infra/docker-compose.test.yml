@@ -1,0 +1,167 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database for Testing
+  postgres-test:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-gantt_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-gantt_pass}
+      POSTGRES_DB: ${POSTGRES_DB:-gantt_db_test}
+    ports:
+      - "5433:5432"
+    networks:
+      - gantt-test-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-gantt_user} -d ${POSTGRES_DB:-gantt_db_test}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - test_db_data:/var/lib/postgresql/data
+
+  # Backend API for Testing
+  backend-test:
+    build:
+      context: ../backend
+      dockerfile: ../infra/Dockerfile.backend
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-gantt_user}:${POSTGRES_PASSWORD:-gantt_pass}@postgres-test:5432/${POSTGRES_DB:-gantt_db_test}?schema=public
+      NODE_ENV: test
+      PORT: 3001
+      FRONTEND_URL: http://frontend-test:3000
+    ports:
+      - "3001:3001"
+    volumes:
+      - ../backend:/app
+      - ../uploads:/app/uploads
+      - ../logs:/app/logs
+      - /app/node_modules
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+    networks:
+      - gantt-test-network
+    command: >
+      sh -c "
+        echo 'Waiting for database...' &&
+        npx prisma migrate reset --force --skip-generate &&
+        npx prisma generate &&
+        npx prisma migrate deploy &&
+        echo 'Starting test backend server...' &&
+        npm run start:dev
+      "
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # Frontend for Testing
+  frontend-test:
+    build:
+      context: ../frontend
+      dockerfile: ../infra/Dockerfile.frontend.dev
+    environment:
+      NEXT_PUBLIC_API_URL: http://backend-test:3001
+      NEXT_PUBLIC_WS_URL: ws://backend-test:3001
+      NODE_ENV: test
+    ports:
+      - "3000:3000"
+    volumes:
+      - ../frontend:/app
+      - /app/node_modules
+      - /app/.next
+    networks:
+      - gantt-test-network
+    depends_on:
+      backend-test:
+        condition: service_healthy
+    command: npm run dev
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # Cypress E2E Testing - Ubuntu-based for Alpine Linux bypass
+  cypress-runner:
+    image: cypress/included:13.15.0
+    working_dir: /e2e
+    environment:
+      # Cypress configuration
+      CYPRESS_baseUrl: http://frontend-test:3000
+      CYPRESS_backendUrl: http://backend-test:3001
+      CYPRESS_video: 'true'
+      CYPRESS_screenshotOnRunFailure: 'true'
+      CYPRESS_defaultCommandTimeout: 15000
+      CYPRESS_requestTimeout: 15000
+      CYPRESS_responseTimeout: 15000
+      CYPRESS_pageLoadTimeout: 60000
+      # JUnit reporting
+      CYPRESS_reporter: junit
+      CYPRESS_reporterOptions: 'mochaFile=cypress/results/test-results-[hash].xml'
+      # Headless mode settings
+      DISPLAY: ':99'
+      # Network debugging
+      DEBUG: 'cypress:*'
+    volumes:
+      - ../frontend:/e2e
+      - cypress_screenshots:/e2e/cypress/screenshots
+      - cypress_videos:/e2e/cypress/videos
+      - cypress_reports:/e2e/cypress/results
+      - cypress_downloads:/e2e/cypress/downloads
+    networks:
+      - gantt-test-network
+    depends_on:
+      frontend-test:
+        condition: service_healthy
+      backend-test:
+        condition: service_healthy
+    command: >
+      sh -c "
+        echo 'Installing dependencies...' &&
+        npm ci &&
+        echo 'Waiting for services to be ready...' &&
+        sleep 30 &&
+        echo 'Running Cypress tests...' &&
+        npx cypress run --config-file cypress.config.docker.ts --browser chrome --headless --reporter junit --reporter-options 'mochaFile=cypress/results/test-results-[hash].xml'
+      "
+    # Prevent auto-start, run manually
+    profiles: ["test"]
+
+  # Test Report Generator
+  test-reporter:
+    image: node:20-alpine
+    working_dir: /reports
+    volumes:
+      - cypress_reports:/reports/cypress
+      - cypress_screenshots:/reports/screenshots  
+      - cypress_videos:/reports/videos
+      - test_reports:/reports/output
+    networks:
+      - gantt-test-network
+    command: >
+      sh -c "
+        echo 'Generating test reports...' &&
+        npm init -y &&
+        npm install --no-save junit2html &&
+        npx junit2html cypress/*.xml --output output/test-report.html &&
+        echo 'Test reports generated in /reports/output/'
+      "
+    profiles: ["report"]
+
+volumes:
+  test_db_data:
+  cypress_screenshots:
+  cypress_videos:
+  cypress_reports:
+  cypress_downloads:
+  test_reports:
+
+networks:
+  gantt-test-network:
+    driver: bridge
+    name: gantt-test-network
