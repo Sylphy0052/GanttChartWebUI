@@ -1,0 +1,487 @@
+{
+  "scenarios": {
+    "basic_hierarchy": {
+      "description": "Basic hierarchical task structure for WBS-Gantt integration testing",
+      "tasks": [
+        {
+          "id": "parent-task-001",
+          "project_id": "test-project",
+          "title": "Frontend Development Phase",
+          "description_md": "Complete frontend development with React components",
+          "status": "in_progress",
+          "assignee": "frontend-lead@example.com",
+          "progress_pct": 65,
+          "is_blocked": false,
+          "labels": ["frontend", "development"],
+          "sort_order": 100,
+          "version": 1,
+          "start_date": "2024-01-01",
+          "end_date": "2024-03-31",
+          "wbs_number": "1",
+          "parent_id": null,
+          "created_at": "2024-01-01T00:00:00Z",
+          "updated_at": "2024-01-15T00:00:00Z",
+          "children": []
+        },
+        {
+          "id": "child-task-001",
+          "project_id": "test-project",
+          "title": "Component Library Setup",
+          "description_md": "Set up reusable component library with Storybook",
+          "status": "done",
+          "assignee": "ui-dev@example.com",
+          "progress_pct": 100,
+          "is_blocked": false,
+          "labels": ["components", "library"],
+          "sort_order": 110,
+          "version": 1,
+          "start_date": "2024-01-01",
+          "end_date": "2024-01-15",
+          "wbs_number": "1.1",
+          "parent_id": "parent-task-001",
+          "created_at": "2024-01-01T00:00:00Z",
+          "updated_at": "2024-01-15T00:00:00Z",
+          "children": []
+        },
+        {
+          "id": "child-task-002",
+          "project_id": "test-project",
+          "title": "Gantt Chart Implementation",
+          "description_md": "Implement interactive Gantt chart with drag & drop",
+          "status": "in_progress",
+          "assignee": "chart-dev@example.com",
+          "progress_pct": 45,
+          "is_blocked": false,
+          "labels": ["gantt", "chart"],
+          "sort_order": 120,
+          "version": 2,
+          "start_date": "2024-01-16",
+          "end_date": "2024-02-29",
+          "wbs_number": "1.2",
+          "parent_id": "parent-task-001",
+          "created_at": "2024-01-01T00:00:00Z",
+          "updated_at": "2024-02-01T00:00:00Z",
+          "children": []
+        },
+        {
+          "id": "milestone-001",
+          "project_id": "test-project",
+          "title": "Beta Release Milestone",
+          "description_md": "Beta version ready for internal testing",
+          "status": "open",
+          "assignee": null,
+          "progress_pct": 0,
+          "is_blocked": false,
+          "labels": ["milestone", "beta"],
+          "sort_order": 200,
+          "version": 1,
+          "start_date": "2024-03-15",
+          "end_date": "2024-03-15",
+          "wbs_number": "2",
+          "parent_id": null,
+          "created_at": "2024-01-01T00:00:00Z",
+          "updated_at": "2024-01-01T00:00:00Z",
+          "children": []
+        }
+      ],
+      "dependencies": [
+        {
+          "id": "dep-001",
+          "predecessor_issue_id": "child-task-001",
+          "successor_issue_id": "child-task-002",
+          "dependency_type": "finish_to_start",
+          "lag_days": 1,
+          "is_active": true,
+          "created_at": "2024-01-01T00:00:00Z",
+          "updated_at": "2024-01-01T00:00:00Z"
+        },
+        {
+          "id": "dep-002",
+          "predecessor_issue_id": "child-task-002",
+          "successor_issue_id": "milestone-001",
+          "dependency_type": "finish_to_start",
+          "lag_days": 14,
+          "is_active": true,
+          "created_at": "2024-01-01T00:00:00Z",
+          "updated_at": "2024-01-01T00:00:00Z"
+        }
+      ]
+    },
+    "complex_dependencies": {
+      "description": "Complex dependency chains for testing constraint validation",
+      "tasks": [
+        {
+          "id": "task-alpha",
+          "project_id": "test-project",
+          "title": "Alpha Task",
+          "description_md": "Starting task in dependency chain",
+          "status": "in_progress",
+          "assignee": "dev-a@example.com",
+          "progress_pct": 80,
+          "is_blocked": false,
+          "labels": ["chain", "start"],
+          "sort_order": 100,
+          "version": 1,
+          "start_date": "2024-01-01",
+          "end_date": "2024-01-10",
+          "wbs_number": "1",
+          "parent_id": null,
+          "created_at": "2024-01-01T00:00:00Z",
+          "updated_at": "2024-01-08T00:00:00Z",
+          "children": []
+        },
+        {
+          "id": "task-beta",
+          "project_id": "test-project",
+          "title": "Beta Task",
+          "description_md": "Middle task in dependency chain",
+          "status": "open",
+          "assignee": "dev-b@example.com",
+          "progress_pct": 10,
+          "is_blocked": false,
+          "labels": ["chain", "middle"],
+          "sort_order": 200,
+          "version": 1,
+          "start_date": "2024-01-12",
+          "end_date": "2024-01-22",
+          "wbs_number": "2",
+          "parent_id": null,
+          "created_at": "2024-01-01T00:00:00Z",
+          "updated_at": "2024-01-01T00:00:00Z",
+          "children": []
+        },
+        {
+          "id": "task-gamma",
+          "project_id": "test-project",
+          "title": "Gamma Task",
+          "description_md": "End task in dependency chain",
+          "status": "open",
+          "assignee": "dev-c@example.com",
+          "progress_pct": 0,
+          "is_blocked": true,
+          "labels": ["chain", "end"],
+          "sort_order": 300,
+          "version": 1,
+          "start_date": "2024-01-25",
+          "end_date": "2024-02-05",
+          "wbs_number": "3",
+          "parent_id": null,
+          "created_at": "2024-01-01T00:00:00Z",
+          "updated_at": "2024-01-01T00:00:00Z",
+          "children": []
+        },
+        {
+          "id": "task-parallel",
+          "project_id": "test-project",
+          "title": "Parallel Task",
+          "description_md": "Independent parallel task",
+          "status": "in_progress",
+          "assignee": "dev-d@example.com",
+          "progress_pct": 50,
+          "is_blocked": false,
+          "labels": ["parallel", "independent"],
+          "sort_order": 400,
+          "version": 1,
+          "start_date": "2024-01-05",
+          "end_date": "2024-01-30",
+          "wbs_number": "4",
+          "parent_id": null,
+          "created_at": "2024-01-01T00:00:00Z",
+          "updated_at": "2024-01-15T00:00:00Z",
+          "children": []
+        }
+      ],
+      "dependencies": [
+        {
+          "id": "chain-dep-1",
+          "predecessor_issue_id": "task-alpha",
+          "successor_issue_id": "task-beta",
+          "dependency_type": "finish_to_start",
+          "lag_days": 1,
+          "is_active": true,
+          "created_at": "2024-01-01T00:00:00Z",
+          "updated_at": "2024-01-01T00:00:00Z"
+        },
+        {
+          "id": "chain-dep-2",
+          "predecessor_issue_id": "task-beta",
+          "successor_issue_id": "task-gamma",
+          "dependency_type": "finish_to_start",
+          "lag_days": 2,
+          "is_active": true,
+          "created_at": "2024-01-01T00:00:00Z",
+          "updated_at": "2024-01-01T00:00:00Z"
+        },
+        {
+          "id": "parallel-dep-1",
+          "predecessor_issue_id": "task-parallel",
+          "successor_issue_id": "task-gamma",
+          "dependency_type": "start_to_start",
+          "lag_days": 0,
+          "is_active": true,
+          "created_at": "2024-01-01T00:00:00Z",
+          "updated_at": "2024-01-01T00:00:00Z"
+        }
+      ]
+    },
+    "milestone_heavy": {
+      "description": "Project with multiple milestones for milestone testing",
+      "tasks": [
+        {
+          "id": "project-start",
+          "project_id": "test-project",
+          "title": "Project Kickoff",
+          "description_md": "Initial project setup and planning",
+          "status": "done",
+          "assignee": "pm@example.com",
+          "progress_pct": 100,
+          "is_blocked": false,
+          "labels": ["kickoff", "planning"],
+          "sort_order": 100,
+          "version": 1,
+          "start_date": "2024-01-01",
+          "end_date": "2024-01-05",
+          "wbs_number": "1",
+          "parent_id": null,
+          "created_at": "2024-01-01T00:00:00Z",
+          "updated_at": "2024-01-05T00:00:00Z",
+          "children": []
+        },
+        {
+          "id": "milestone-quarter-1",
+          "project_id": "test-project",
+          "title": "Q1 Milestone",
+          "description_md": "First quarter deliverables complete",
+          "status": "done",
+          "assignee": null,
+          "progress_pct": 0,
+          "is_blocked": false,
+          "labels": ["milestone", "q1"],
+          "sort_order": 200,
+          "version": 1,
+          "start_date": "2024-03-31",
+          "end_date": "2024-03-31",
+          "wbs_number": "M1",
+          "parent_id": null,
+          "created_at": "2024-01-01T00:00:00Z",
+          "updated_at": "2024-03-31T00:00:00Z",
+          "children": []
+        },
+        {
+          "id": "milestone-quarter-2",
+          "project_id": "test-project",
+          "title": "Q2 Milestone",
+          "description_md": "Second quarter deliverables complete",
+          "status": "in_progress",
+          "assignee": null,
+          "progress_pct": 0,
+          "is_blocked": false,
+          "labels": ["milestone", "q2"],
+          "sort_order": 300,
+          "version": 1,
+          "start_date": "2024-06-30",
+          "end_date": "2024-06-30",
+          "wbs_number": "M2",
+          "parent_id": null,
+          "created_at": "2024-01-01T00:00:00Z",
+          "updated_at": "2024-01-01T00:00:00Z",
+          "children": []
+        },
+        {
+          "id": "milestone-final",
+          "project_id": "test-project",
+          "title": "Project Completion",
+          "description_md": "Final project deliverable and closure",
+          "status": "open",
+          "assignee": null,
+          "progress_pct": 0,
+          "is_blocked": false,
+          "labels": ["milestone", "final"],
+          "sort_order": 400,
+          "version": 1,
+          "start_date": "2024-12-31",
+          "end_date": "2024-12-31",
+          "wbs_number": "M3",
+          "parent_id": null,
+          "created_at": "2024-01-01T00:00:00Z",
+          "updated_at": "2024-01-01T00:00:00Z",
+          "children": []
+        }
+      ],
+      "dependencies": [
+        {
+          "id": "milestone-dep-1",
+          "predecessor_issue_id": "project-start",
+          "successor_issue_id": "milestone-quarter-1",
+          "dependency_type": "finish_to_start",
+          "lag_days": 85,
+          "is_active": true,
+          "created_at": "2024-01-01T00:00:00Z",
+          "updated_at": "2024-01-01T00:00:00Z"
+        },
+        {
+          "id": "milestone-dep-2",
+          "predecessor_issue_id": "milestone-quarter-1",
+          "successor_issue_id": "milestone-quarter-2",
+          "dependency_type": "finish_to_start",
+          "lag_days": 91,
+          "is_active": true,
+          "created_at": "2024-01-01T00:00:00Z",
+          "updated_at": "2024-01-01T00:00:00Z"
+        },
+        {
+          "id": "milestone-dep-3",
+          "predecessor_issue_id": "milestone-quarter-2",
+          "successor_issue_id": "milestone-final",
+          "dependency_type": "finish_to_start",
+          "lag_days": 184,
+          "is_active": true,
+          "created_at": "2024-01-01T00:00:00Z",
+          "updated_at": "2024-01-01T00:00:00Z"
+        }
+      ]
+    },
+    "performance_test": {
+      "description": "Large dataset for performance testing",
+      "task_count": 100,
+      "dependency_count": 80,
+      "task_template": {
+        "project_id": "test-project",
+        "title": "Performance Test Task {index}",
+        "description_md": "Automated performance test task number {index}",
+        "status": "open",
+        "assignee": "perf-tester-{modulo}@example.com",
+        "progress_pct": "{random_progress}",
+        "is_blocked": false,
+        "labels": ["performance", "test"],
+        "sort_order": "{index * 100}",
+        "version": 1,
+        "start_date": "2024-01-{day}",
+        "end_date": "2024-01-{end_day}",
+        "wbs_number": "{index}",
+        "parent_id": null,
+        "created_at": "2024-01-01T00:00:00Z",
+        "updated_at": "2024-01-01T00:00:00Z",
+        "children": []
+      },
+      "dependency_template": {
+        "predecessor_issue_id": "perf-task-{predecessor_index}",
+        "successor_issue_id": "perf-task-{successor_index}",
+        "dependency_type": "finish_to_start",
+        "lag_days": "{random_lag}",
+        "is_active": true,
+        "created_at": "2024-01-01T00:00:00Z",
+        "updated_at": "2024-01-01T00:00:00Z"
+      }
+    }
+  },
+  "error_scenarios": {
+    "invalid_dates": {
+      "description": "Tasks with invalid date ranges for error handling testing",
+      "tasks": [
+        {
+          "id": "invalid-date-task",
+          "project_id": "test-project",
+          "title": "Invalid Date Task",
+          "description_md": "Task with end date before start date",
+          "status": "open",
+          "assignee": "error-tester@example.com",
+          "progress_pct": 0,
+          "is_blocked": false,
+          "labels": ["error", "invalid"],
+          "sort_order": 100,
+          "version": 1,
+          "start_date": "2024-02-01",
+          "end_date": "2024-01-01",
+          "wbs_number": "ERR1",
+          "parent_id": null,
+          "created_at": "2024-01-01T00:00:00Z",
+          "updated_at": "2024-01-01T00:00:00Z",
+          "children": []
+        }
+      ]
+    },
+    "missing_data": {
+      "description": "Tasks with missing required fields",
+      "tasks": [
+        {
+          "id": "missing-data-task",
+          "project_id": "test-project",
+          "title": "",
+          "description_md": null,
+          "status": null,
+          "assignee": null,
+          "progress_pct": null,
+          "is_blocked": false,
+          "labels": [],
+          "sort_order": 100,
+          "version": 1,
+          "start_date": null,
+          "end_date": null,
+          "wbs_number": "ERR2",
+          "parent_id": null,
+          "created_at": "2024-01-01T00:00:00Z",
+          "updated_at": "2024-01-01T00:00:00Z",
+          "children": []
+        }
+      ]
+    }
+  },
+  "websocket_scenarios": {
+    "real_time_updates": {
+      "description": "WebSocket event scenarios for real-time testing",
+      "events": [
+        {
+          "type": "dependency_created",
+          "data": {
+            "projectId": "test-project",
+            "dependency": {
+              "id": "realtime-dep-1",
+              "predecessor_issue_id": "task-alpha",
+              "successor_issue_id": "task-beta",
+              "dependency_type": "finish_to_start",
+              "lag_days": 0,
+              "is_active": true
+            },
+            "author": "colleague@example.com",
+            "timestamp": "2024-01-15T10:30:00Z"
+          }
+        },
+        {
+          "type": "dependency_deleted",
+          "data": {
+            "projectId": "test-project",
+            "dependencyId": "realtime-dep-1",
+            "author": "manager@example.com",
+            "timestamp": "2024-01-15T11:00:00Z"
+          }
+        },
+        {
+          "type": "issue_updated",
+          "data": {
+            "projectId": "test-project",
+            "issue": {
+              "id": "task-alpha",
+              "progress_pct": 90,
+              "status": "in_progress",
+              "version": 2
+            },
+            "author": "developer@example.com",
+            "timestamp": "2024-01-15T12:00:00Z"
+          }
+        },
+        {
+          "type": "schedule_adjusted",
+          "data": {
+            "projectId": "test-project",
+            "affectedIssues": ["task-beta", "task-gamma"],
+            "reason": "dependency_change",
+            "triggerIssue": "task-alpha",
+            "author": "system",
+            "timestamp": "2024-01-15T12:05:00Z"
+          }
+        }
+      ]
+    }
+  }
+}

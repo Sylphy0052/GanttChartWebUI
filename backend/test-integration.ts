@@ -41,7 +41,7 @@ describe('NestJS-Prisma Integration', () => {
   });
 
   it('受け入れ条件2: /healthエンドポイントでDB接続状態が確認できる', async () => {
-    const result = await healthController.checkHealth();
+    const result = await healthController.getHealthStatus();
     
     expect(result).toBeDefined();
     expect(result.status).toBeDefined();
