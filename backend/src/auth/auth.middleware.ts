@@ -1,5 +1,6 @@
 import { Injectable, NestMiddleware, UnauthorizedException, Logger } from '@nestjs/common';
 import { Request, Response, NextFunction } from 'express';
+import * as jwt from 'jsonwebtoken';
 
 /**
  * 認証設定interfaces
@@ -367,47 +368,24 @@ export class AuthMiddleware implements NestMiddleware {
   }
 
   /**
-   * 強化されたJWT検証
+   * 強化されたJWT検証（適切なライブラリ使用）
    * @param token JWTトークン
    * @returns ペイロード
    */
   private verifyJwtEnhanced(token: string): any {
     try {
-      const parts = token.split('.');
-      if (parts.length !== 3) {
-        throw new Error('Invalid JWT format');
+      const secret = this.config.jwt?.secret;
+      if (!secret) {
+        throw new Error('JWT secret not configured');
       }
 
-      // ヘッダー検証
-      const header = JSON.parse(Buffer.from(parts[0], 'base64').toString('utf-8'));
-      if (header.alg !== 'HS256' && header.alg !== 'none') {
-        throw new Error(`Unsupported algorithm: ${header.alg}`);
-      }
-
-      const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf-8'));
-      
-      // 基本的な検証
-      const now = Math.floor(Date.now() / 1000);
-      
-      // 有効期限チェック（厳格化）
-      if (payload.exp && now >= payload.exp) {
-        throw new Error('Token expired');
-      }
-      
-      // 発行時刻チェック（未来のトークンを拒否）
-      if (payload.iat && payload.iat > now + 60) { // 1分の時計スキューを許可
-        throw new Error('Token used before issued');
-      }
-      
-      // Audience/Issuer チェック（設定されている場合）
-      if (payload.aud && payload.aud !== 'gantt-chart-webui') {
-        throw new Error('Invalid audience');
-      }
-      
-      // 署名検証（簡易版 - 本番では適切なライブラリを推奨）
-      if (header.alg === 'HS256') {
-        this.verifySignature(parts, this.config.jwt?.secret || '');
-      }
+      // jsonwebtokenライブラリを使用した安全な検証
+      const payload = jwt.verify(token, secret, {
+        algorithms: ['HS256'], // アルゴリズムを明示的に指定
+        audience: 'gantt-chart-webui',
+        issuer: 'gantt-chart-webui',
+        clockTolerance: 60, // 1分のクロックスキュー許容
+      });
 
       return payload;
     } catch (error) {
@@ -415,22 +393,6 @@ export class AuthMiddleware implements NestMiddleware {
     }
   }
 
-  /**
-   * JWT署名検証（簡易版）
-   * @param parts JWTの分割された部分
-   * @param secret 秘密鍵
-   */
-  private verifySignature(parts: string[], secret: string): void {
-    // 注意: 本番環境では適切なHMAC実装を使用すること
-    // この実装は基本的な検証のみを行う
-    const [header, payload, signature] = parts;
-    const data = `${header}.${payload}`;
-    
-    // 基本的な署名存在チェック
-    if (!signature || signature.length < 10) {
-      throw new Error('Invalid signature');
-    }
-  }
 
   /**
    * トークンリフレッシュが必要かチェック

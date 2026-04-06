@@ -35,7 +35,9 @@ import {
  */
 @WebSocketGateway({
   cors: {
-    origin: '*',
+    origin: process.env.NODE_ENV === 'production' 
+      ? (process.env.ALLOWED_ORIGINS?.split(',') || ['https://your-production-domain.com']) 
+      : ['http://localhost:3000', 'http://localhost:3011', 'http://localhost:3001'],
     methods: ['GET', 'POST'],
     credentials: true,
   },

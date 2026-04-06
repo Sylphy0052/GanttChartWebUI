@@ -26,7 +26,7 @@ import { UploadResponseDto } from '../uploads/dto';
 
 /**
  * IssuesController - Issue REST エンドポイント
- * 
+ *
  * エンドポイント:
  * - GET /projects/:projectId/issues - Issue一覧取得 [viewer権限]
  * - GET /projects/:projectId/issues/:id - 単一Issue取得 [viewer権限]
@@ -34,14 +34,15 @@ import { UploadResponseDto } from '../uploads/dto';
  * - GET /projects/:projectId/issues/:id/uploads - Issue画像一覧取得 [viewer権限]
  * - POST /projects/:projectId/issues - Issue作成 [editor権限]
  * - PUT /projects/:projectId/issues/:id - Issue更新 [editor権限]
+ * - PATCH /projects/:projectId/issues/:id - Issue部分更新（オプティミスティックロック対応） [editor権限]
  * - DELETE /projects/:projectId/issues/:id - Issue削除 [editor権限]
  * - PATCH /projects/:projectId/issues/reorder - 複数Issue並び替え [editor権限]
  * - PATCH /issues/:id/hierarchy - Issue階層変更 [editor権限]
- * 
+ *
  * 権限管理:
  * - viewer: GET系操作のみ可能
  * - editor: 全ての操作が可能
- * 
+ *
  * 各エンドポイントには適切なHTTPステータスコードとバリデーションを適用
  */
 @Controller()
@@ -66,14 +67,14 @@ export class IssuesController {
   @RequireRole('editor')
   async create(
     @Param('projectId') projectId: string,
-    @Body(new ValidationPipe({ whitelist: true, transform: true })) 
+    @Body(new ValidationPipe({ whitelist: true, transform: true }))
     createIssueDto: CreateIssueDto,
   ): Promise<IssueResponseDto> {
     this.logger.log(`POST /projects/${projectId}/issues - Creating issue: ${createIssueDto.title}`);
-    
+
     // CreateIssueDtoをそのまま渡す（project_idはService内で処理）
     const result = await this.issuesService.create(projectId, createIssueDto);
-    
+
     this.logger.log(`POST /projects/${projectId}/issues - Issue created successfully: ${result.id}`);
     return result;
   }
@@ -88,9 +89,9 @@ export class IssuesController {
   @RequireRole('viewer')
   async findAll(@Param('projectId') projectId: string): Promise<IssueResponseDto[]> {
     this.logger.log(`GET /projects/${projectId}/issues - Fetching all issues`);
-    
+
     const result = await this.issuesService.findAllByProject(projectId);
-    
+
     this.logger.log(`GET /projects/${projectId}/issues - Returned ${result.length} issues`);
     return result;
   }
@@ -106,9 +107,9 @@ export class IssuesController {
   @RequireRole('viewer')
   async findOne(@Param('projectId') projectId: string, @Param('id') id: string): Promise<IssueResponseDto> {
     this.logger.log(`GET /projects/${projectId}/issues/${id} - Fetching issue details`);
-    
+
     const result = await this.issuesService.findOne(projectId, id);
-    
+
     this.logger.log(`GET /projects/${projectId}/issues/${id} - Issue found: ${result.title}`);
     return result;
   }
@@ -123,13 +124,13 @@ export class IssuesController {
   @HttpCode(HttpStatus.OK)
   @RequireRole('viewer')
   async findOneWithDetails(
-    @Param('projectId') projectId: string, 
+    @Param('projectId') projectId: string,
     @Param('id') id: string
   ): Promise<any> {
     this.logger.log(`GET /projects/${projectId}/issues/${id}/detail - Fetching issue with details`);
-    
+
     const result = await this.issuesService.findOneWithDetails(projectId, id);
-    
+
     this.logger.log(`GET /projects/${projectId}/issues/${id}/detail - Issue details found: ${result.title}`);
     return result;
   }
@@ -147,14 +148,38 @@ export class IssuesController {
   async update(
     @Param('projectId') projectId: string,
     @Param('id') id: string,
-    @Body(new ValidationPipe({ whitelist: true, transform: true, skipMissingProperties: true })) 
+    @Body(new ValidationPipe({ whitelist: true, transform: true, skipMissingProperties: true }))
     updateIssueDto: UpdateIssueDto,
   ): Promise<IssueResponseDto> {
     this.logger.log(`PUT /projects/${projectId}/issues/${id} - Updating issue`);
-    
+
     const result = await this.issuesService.update(projectId, id, updateIssueDto);
-    
+
     this.logger.log(`PUT /projects/${projectId}/issues/${id} - Issue updated successfully: ${result.title}`);
+    return result;
+  }
+
+  /**
+   * Issue部分更新（オプティミスティックロック対応）
+   * @param projectId プロジェクトID
+   * @param id IssueID
+   * @param updateIssueDto 更新データ（version含む）
+   * @returns 更新されたIssue
+   */
+  @Patch('projects/:projectId/issues/:id')
+  @HttpCode(HttpStatus.OK)
+  @RequireRole('editor')
+  async patch(
+    @Param('projectId') projectId: string,
+    @Param('id') id: string,
+    @Body(new ValidationPipe({ whitelist: true, transform: true, skipMissingProperties: true }))
+    updateIssueDto: UpdateIssueDto,
+  ): Promise<IssueResponseDto> {
+    this.logger.log(`PATCH /projects/${projectId}/issues/${id} - Patching issue with version: ${updateIssueDto.version}`);
+
+    const result = await this.issuesService.update(projectId, id, updateIssueDto);
+
+    this.logger.log(`PATCH /projects/${projectId}/issues/${id} - Issue patched successfully: ${result.title}`);
     return result;
   }
 
@@ -168,9 +193,9 @@ export class IssuesController {
   @RequireRole('editor')
   async remove(@Param('projectId') projectId: string, @Param('id') id: string): Promise<void> {
     this.logger.log(`DELETE /projects/${projectId}/issues/${id} - Deleting issue`);
-    
+
     await this.issuesService.remove(projectId, id);
-    
+
     this.logger.log(`DELETE /projects/${projectId}/issues/${id} - Issue deleted successfully`);
   }
 
@@ -188,9 +213,9 @@ export class IssuesController {
     reorderIssuesDto: ReorderIssuesDto,
   ): Promise<IssueResponseDto[]> {
     this.logger.log(`PATCH /issues/reorder - Reordering ${reorderIssuesDto.issues.length} issues`);
-    
+
     const result = await this.issuesService.reorderIssues(reorderIssuesDto);
-    
+
     this.logger.log(`PATCH /issues/reorder - Successfully reordered ${result.length} issues`);
     return result;
   }
@@ -210,9 +235,9 @@ export class IssuesController {
     changeHierarchyDto: ChangeHierarchyDto,
   ): Promise<IssueResponseDto> {
     this.logger.log(`PATCH /issues/${id}/hierarchy - Changing hierarchy, new_parent_id: ${changeHierarchyDto.new_parent_id}`);
-    
+
     const result = await this.issuesService.changeHierarchy(id, changeHierarchyDto);
-    
+
     this.logger.log(`PATCH /issues/${id}/hierarchy - Successfully changed hierarchy: ${result.title}`);
     return result;
   }
@@ -231,9 +256,9 @@ export class IssuesController {
     @Param('id') id: string,
   ): Promise<ChangeLogResponseDto[]> {
     this.logger.log(`GET /projects/${projectId}/issues/${id}/changelog - Fetching changelog for issue: ${id}`);
-    
+
     const changeLogs = await this.changeLogService.getChangeLogsByEntity(id);
-    
+
     this.logger.log(`GET /projects/${projectId}/issues/${id}/changelog - Found ${changeLogs.length} change logs`);
     return changeLogs;
   }
@@ -252,9 +277,9 @@ export class IssuesController {
     @Param('id') id: string,
   ): Promise<UploadResponseDto[]> {
     this.logger.log(`GET /projects/${projectId}/issues/${id}/uploads - Fetching uploads for issue: ${id}`);
-    
+
     const uploads = await this.uploadsService.getImagesByIssue(id);
-    
+
     this.logger.log(`GET /projects/${projectId}/issues/${id}/uploads - Found ${uploads.length} uploads`);
     return uploads;
   }
