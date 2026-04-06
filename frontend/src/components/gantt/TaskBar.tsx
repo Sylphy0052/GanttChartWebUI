@@ -11,8 +11,9 @@ export interface TaskBarProps {
   endDate: Date;
   width: number;
   height?: number;
-  onClick?: () => void;
-  onDoubleClick?: () => void;
+  onClick?: (event: React.MouseEvent) => void;
+  onDoubleClick?: (event: React.MouseEvent) => void;
+  onContextMenu?: (event: React.MouseEvent) => void;
   className?: string;
   showLabel?: boolean;
   showProgress?: boolean;
@@ -31,6 +32,7 @@ const TaskBar: React.FC<TaskBarProps> = ({
   height = 24,
   onClick,
   onDoubleClick,
+  onContextMenu,
   className = '',
   showLabel = true,
   showProgress = true,
@@ -84,6 +86,7 @@ const TaskBar: React.FC<TaskBarProps> = ({
       style={barStyle}
       onClick={onClick}
       onDoubleClick={onDoubleClick}
+      onContextMenu={onContextMenu}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
       title={`${displayText}\n期間: ${durationText}\n進捗: ${issue.progress_pct}%\nステータス: ${getStatusDisplayName(issue.status)}${issue.is_blocked ? '\n⚠️ ブロック中' : ''}`}

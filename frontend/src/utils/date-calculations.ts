@@ -35,6 +35,7 @@ export const DEFAULT_BUSINESS_CONFIG: BusinessDayConfig = {
 export const dateCalculations = {
   /**
    * 二つの日付の差分を日数で計算
+   * 注意: この関数は期間の日数差分を返します（開始日と終了日を含む日数を計算する場合は+1が必要）
    */
   daysBetween: (startDate: Date, endDate: Date): number => {
     const timeDiff = endDate.getTime() - startDate.getTime();

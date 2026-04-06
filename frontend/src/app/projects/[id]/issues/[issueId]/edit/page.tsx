@@ -106,14 +106,20 @@ export default function EditIssuePage() {
         // 他に更新するフィールドがある場合のみupdate APIを呼び出す
         if (Object.keys(updateData).length > 0) {
           console.log('Update data after hierarchy change:', updateData);
-          const updatedIssue = await issuesApi.update(projectId, issueId, updateData);
+          const updatedIssue = await issuesApi.update(projectId, issueId, {
+            ...updateData,
+            version: issue?.version, // 楽観ロック
+          });
         }
       } else {
         // parent_idの変更がない場合は通常の更新
-        // parent_idとversionを除外（versionはBackendで自動処理される）
-        const { parent_id, version, ...updateData } = data;
+        // parent_idを除外、versionは楽観ロック用に含める
+        const { parent_id, ...updateData } = data;
         console.log('Update data:', updateData);
-        const updatedIssue = await issuesApi.update(projectId, issueId, updateData);
+        const updatedIssue = await issuesApi.update(projectId, issueId, {
+          ...updateData,
+          version: issue?.version, // 楽観ロック
+        });
       }
       
       // 成功時はIssue一覧ページにリダイレクト

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { useDraggable } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
 import { Issue } from '../../types/issue';
@@ -12,8 +12,8 @@ export interface DraggableTaskBarProps extends Omit<TaskBarProps, 'onClick'> {
   endDate: Date;
   width: number;
   height?: number;
-  onDateChange?: (issueId: string, newStartDate: Date, newEndDate: Date) => Promise<void>;
-  onTaskSelect?: (issue: Issue) => void;
+  onDateChange?: (issue: Issue, newStartDate: Date, newEndDate: Date) => Promise<void>;
+  onTaskSelect?: (issue: Issue, event: React.MouseEvent) => void;
   className?: string;
   showLabel?: boolean;
   showProgress?: boolean;
@@ -48,6 +48,8 @@ const DraggableTaskBar: React.FC<DraggableTaskBarProps> = ({
 }) => {
   const [isHovered, setIsHovered] = useState(false);
   const [dragStartPosition, setDragStartPosition] = useState<{ x: number; y: number } | null>(null);
+  const [resizeMode, setResizeMode] = useState<'start' | 'end' | null>(null);
+  const [isDraggingResize, setIsDraggingResize] = useState(false);
 
   // @dnd-kit ドラッグ設定
   const {
@@ -73,12 +75,69 @@ const DraggableTaskBar: React.FC<DraggableTaskBarProps> = ({
     transform: CSS.Translate.toString(transform),
   };
 
-  // タスク選択ハンドラー
-  const handleTaskClick = useCallback(() => {
-    if (!readOnly && onTaskSelect) {
-      onTaskSelect(issue);
+  // リサイズハンドラー
+  const handleResizeStart = useCallback((event: React.MouseEvent, mode: 'start' | 'end') => {
+    if (readOnly || disabled) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    setResizeMode(mode);
+    setIsDraggingResize(true);
+    setDragStartPosition({ x: event.clientX, y: event.clientY });
+  }, [readOnly, disabled]);
+
+  const handleResizeMove = useCallback((event: MouseEvent) => {
+    if (!isDraggingResize || !dragStartPosition || !resizeMode || !onDateChange) return;
+
+    const deltaX = event.clientX - dragStartPosition.x;
+    const dayWidth = 40; // 1日あたりのピクセル数（設定に応じて調整）
+    const daysDelta = Math.round(deltaX / dayWidth);
+
+    if (daysDelta === 0) return;
+
+    const newStartDate = new Date(startDate);
+    const newEndDate = new Date(endDate);
+
+    if (resizeMode === 'start') {
+      newStartDate.setDate(newStartDate.getDate() + daysDelta);
+      // 開始日が終了日を超えないように制限
+      if (newStartDate >= newEndDate) return;
+    } else {
+      newEndDate.setDate(newEndDate.getDate() + daysDelta);
+      // 終了日が開始日を下回らないように制限
+      if (newEndDate <= newStartDate) return;
     }
-  }, [readOnly, onTaskSelect, issue]);
+
+    onDateChange(issue, newStartDate, newEndDate);
+    setDragStartPosition({ x: event.clientX, y: event.clientY });
+  }, [isDraggingResize, dragStartPosition, resizeMode, onDateChange, issue, startDate, endDate]);
+
+  const handleResizeEnd = useCallback(() => {
+    setIsDraggingResize(false);
+    setResizeMode(null);
+    setDragStartPosition(null);
+  }, []);
+
+  // リサイズイベントリスナー
+  useEffect(() => {
+    if (isDraggingResize) {
+      document.addEventListener('mousemove', handleResizeMove);
+      document.addEventListener('mouseup', handleResizeEnd);
+
+      return () => {
+        document.removeEventListener('mousemove', handleResizeMove);
+        document.removeEventListener('mouseup', handleResizeEnd);
+      };
+    }
+  }, [isDraggingResize, handleResizeMove, handleResizeEnd]);
+
+  // タスク選択ハンドラー
+  const handleTaskClick = useCallback((event: React.MouseEvent) => {
+    if (!readOnly && onTaskSelect && !isDraggingResize) {
+      onTaskSelect(issue, event);
+    }
+  }, [readOnly, onTaskSelect, issue, isDraggingResize]);
 
   // タスクバー用の拡張スタイル
   const enhancedClassName = [
@@ -93,13 +152,12 @@ const DraggableTaskBar: React.FC<DraggableTaskBarProps> = ({
     <div
       ref={setNodeRef}
       style={dragStyle}
-      className={`draggable-task-bar-container ${dndIsDragging ? 'dragging' : ''}`}
+      className={`draggable-task-bar-container relative ${dndIsDragging ? 'dragging' : ''}`}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
       {...attributes}
-      {...listeners}
+      {...(readOnly || disabled ? {} : listeners)}
     >
-      {/* 基本TaskBarコンポーネント */}
       <TaskBar
         issue={issue}
         startDate={startDate}
@@ -114,36 +172,30 @@ const DraggableTaskBar: React.FC<DraggableTaskBarProps> = ({
         {...props}
       />
 
-      {/* ドラッグ中のゴーストバー */}
-      {dndIsDragging && (
+      {/* 左端のリサイズハンドル */}
+      {!readOnly && !disabled && isHovered && (
         <div
-          className={`absolute top-0 left-0 bg-blue-400 bg-opacity-60 border-2 border-blue-500 rounded-md ${
-            isConstraintViolated ? 'bg-red-400 border-red-500' : ''
-          }`}
-          style={{
-            width: `${width}px`,
-            height: `${height}px`,
-            pointerEvents: 'none',
-            zIndex: 1000,
-          }}
-        >
-          <div className="absolute inset-0 flex items-center justify-center text-xs font-medium text-white">
-            移動中...
-          </div>
-        </div>
+          className="absolute left-0 top-0 w-2 h-full bg-blue-500 opacity-0 hover:opacity-100 cursor-col-resize z-10 transition-opacity duration-200"
+          style={{ left: '-1px' }}
+          onMouseDown={(e) => handleResizeStart(e, 'start')}
+          title="開始日を変更"
+        />
       )}
 
-      {/* 制約違反時の警告表示 */}
+      {/* 右端のリサイズハンドル */}
+      {!readOnly && !disabled && isHovered && (
+        <div
+          className="absolute right-0 top-0 w-2 h-full bg-blue-500 opacity-0 hover:opacity-100 cursor-col-resize z-10 transition-opacity duration-200"
+          style={{ right: '-1px' }}
+          onMouseDown={(e) => handleResizeStart(e, 'end')}
+          title="終了日を変更"
+        />
+      )}
+
+      {/* エラーメッセージ表示 */}
       {isConstraintViolated && errorMessage && (
-        <div className="absolute -top-8 left-0 bg-red-600 text-white text-xs px-2 py-1 rounded whitespace-nowrap z-50 pointer-events-none">
-          ⚠️ {errorMessage}
-        </div>
-      )}
-
-      {/* ホバー時のドラッグヒント */}
-      {isHovered && !readOnly && !disabled && !dndIsDragging && (
-        <div className="absolute -top-8 left-0 bg-gray-900 text-white text-xs px-2 py-1 rounded whitespace-nowrap z-30 pointer-events-none">
-          ドラッグで日程変更
+        <div className="absolute top-full left-0 mt-1 bg-red-100 border border-red-300 text-red-700 text-xs px-2 py-1 rounded shadow-lg z-20 whitespace-nowrap">
+          {errorMessage}
         </div>
       )}
     </div>

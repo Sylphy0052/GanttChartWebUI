@@ -47,7 +47,7 @@ export interface DependencyLinesProps {
  * 依存関係線表示コンポーネント
  * FS (Finish-to-Start) 依存関係を矢印線で視覚化
  */
-const DependencyLines: React.FC<DependencyLinesProps> = ({
+const DependencyLinesComponent: React.FC<DependencyLinesProps> = ({
   issues,
   dependencies,
   containerRef,
@@ -62,7 +62,6 @@ const DependencyLines: React.FC<DependencyLinesProps> = ({
 }) => {
   const svgRef = useRef<SVGSVGElement>(null);
   const [taskPositions, setTaskPositions] = useState<Record<string, TaskPosition>>({});
-  const [visibleDependencyLines, setVisibleDependencyLines] = useState<DependencyLine[]>([]);
   const [hoveredDependency, setHoveredDependency] = useState<string | null>(null);
 
   // オプションのマージ
@@ -71,17 +70,17 @@ const DependencyLines: React.FC<DependencyLinesProps> = ({
     ...options,
   }), [options]);
 
-  // タスク位置の更新
-  const updatePositions = useCallback(() => {
+  // タスク位置の更新（issuesまたはrowHeightが変更されたとき）
+  useEffect(() => {
     if (!containerRef.current) return;
 
     const positions = updateTaskPositions(issues, containerRef.current, rowHeight);
     setTaskPositions(positions);
-  }, [issues, containerRef, rowHeight]);
+  }, [issues, rowHeight]);
 
-  // 依存関係線の再計算
-  const recalculateLines = useCallback(() => {
-    if (!Object.keys(taskPositions).length) return;
+  // 依存関係線をuseMemoで安全に計算
+  const calculatedLines = useMemo(() => {
+    if (!Object.keys(taskPositions).length || !dependencies.length) return [];
 
     const lines = dependencies.map(dependency => {
       const predecessorPos = taskPositions[dependency.predecessor_issue_id];
@@ -106,18 +105,17 @@ const DependencyLines: React.FC<DependencyLinesProps> = ({
       } as DependencyLine;
     }).filter(Boolean) as DependencyLine[];
 
-    const visibleLines = filterVisibleDependencies(lines, containerRef.current);
-    setVisibleDependencyLines(visibleLines);
-  }, [dependencies, taskPositions, lineOptions, selectedDependency, hoveredDependency, containerRef]);
-
-  // 初期化とイベントハンドラー
-  useEffect(() => {
-    updatePositions();
-  }, [updatePositions]);
-
-  useEffect(() => {
-    recalculateLines();
-  }, [recalculateLines]);
+    return filterVisibleDependencies(lines, containerRef.current);
+  }, [
+    // 安全な依存関係のみ - プリミティブ値を使用
+    Object.keys(taskPositions).length,
+    dependencies.length,
+    dependencies.map(d => d.id).sort().join('|'), // 依存関係IDの変更を検出
+    selectedDependency,
+    hoveredDependency,
+    lineOptions.strokeWidth, // 描画オプションの変更
+    lineOptions.color
+  ]);
 
   // スクロール・リサイズイベントリスナー
   useEffect(() => {
@@ -125,11 +123,15 @@ const DependencyLines: React.FC<DependencyLinesProps> = ({
     if (!container) return;
 
     const handleScroll = () => {
-      updatePositions();
+      if (!containerRef.current) return;
+      const positions = updateTaskPositions(issues, containerRef.current, rowHeight);
+      setTaskPositions(positions);
     };
 
     const handleResize = () => {
-      updatePositions();
+      if (!containerRef.current) return;
+      const positions = updateTaskPositions(issues, containerRef.current, rowHeight);
+      setTaskPositions(positions);
     };
 
     container.addEventListener('scroll', handleScroll);
@@ -139,7 +141,7 @@ const DependencyLines: React.FC<DependencyLinesProps> = ({
       container.removeEventListener('scroll', handleScroll);
       window.removeEventListener('resize', handleResize);
     };
-  }, [updatePositions]);
+  }, [issues, rowHeight]);
 
   // 依存関係線クリックハンドラー
   const handleDependencyClick = useCallback((line: DependencyLine, event: React.MouseEvent) => {
@@ -171,7 +173,7 @@ const DependencyLines: React.FC<DependencyLinesProps> = ({
   const svgWidth = containerRect?.width || 0;
   const svgHeight = containerRect?.height || 0;
 
-  if (!containerRef.current || visibleDependencyLines.length === 0) {
+  if (!containerRef.current || calculatedLines.length === 0) {
     return null;
   }
 
@@ -220,7 +222,7 @@ const DependencyLines: React.FC<DependencyLinesProps> = ({
       </defs>
 
       {/* 依存関係線の描画 */}
-      {visibleDependencyLines.map((line) => (
+      {calculatedLines.map((line) => (
         <g key={line.dependency.id}>
           {/* 依存関係矢印線 */}
           <DependencyArrow
@@ -256,5 +258,41 @@ const DependencyLines: React.FC<DependencyLinesProps> = ({
     </svg>
   );
 };
+
+// React.memoでコンポーネントをメモ化
+const DependencyLines = React.memo(DependencyLinesComponent, (prevProps, nextProps) => {
+  // カスタム比較関数で無駄な再レンダリングを防ぐ
+  if (
+    prevProps.issues.length !== nextProps.issues.length ||
+    prevProps.dependencies.length !== nextProps.dependencies.length ||
+    prevProps.selectedDependency !== nextProps.selectedDependency ||
+    prevProps.rowHeight !== nextProps.rowHeight ||
+    prevProps.disabled !== nextProps.disabled
+  ) {
+    return false;
+  }
+
+  // 依存関係の詳細比較（IDのみ）
+  if (prevProps.dependencies.length > 0) {
+    const prevDepIds = prevProps.dependencies.map(d => d.id).sort();
+    const nextDepIds = nextProps.dependencies.map(d => d.id).sort();
+    if (prevDepIds.join(',') !== nextDepIds.join(',')) {
+      return false;
+    }
+  }
+
+  // Issuesの詳細比較（IDのみ）
+  if (prevProps.issues.length > 0) {
+    const prevIssueIds = prevProps.issues.map(i => i.id).sort();
+    const nextIssueIds = nextProps.issues.map(i => i.id).sort();
+    if (prevIssueIds.join(',') !== nextIssueIds.join(',')) {
+      return false;
+    }
+  }
+
+  return true;
+});
+
+DependencyLines.displayName = 'DependencyLines';
 
 export default DependencyLines;

@@ -20,40 +20,40 @@ export interface GanttColorScheme {
  */
 export const GANTT_STATUS_COLORS: Record<IssueStatus, GanttColorScheme> = {
   open: {
-    task: '#6b7280',           // gray-500
-    taskHover: '#4b5563',      // gray-600
-    taskText: '#ffffff',
-    progress: '#4b5563',       // gray-600
-    progressBackground: '#e5e7eb', // gray-200
-    milestone: '#6b7280',
-    milestoneHover: '#4b5563',
+    task: '#94a3b8',           // slate-400 - 明るいグレー（未着手感を表現）
+    taskHover: '#64748b',      // slate-500
+    taskText: '#1e293b',       // slate-800 - ダークグレー（読みやすい）
+    progress: '#64748b',       // slate-500
+    progressBackground: '#e2e8f0', // slate-200
+    milestone: '#94a3b8',
+    milestoneHover: '#64748b',
   },
   in_progress: {
-    task: '#3b82f6',           // blue-500
+    task: '#3b82f6',           // blue-500 - 鮮やかな青（進行中感を表現）
     taskHover: '#2563eb',      // blue-600
-    taskText: '#ffffff',
+    taskText: '#ffffff',       // 白文字（青背景に対して最適）
     progress: '#1d4ed8',       // blue-700
     progressBackground: '#dbeafe', // blue-100
     milestone: '#3b82f6',
     milestoneHover: '#2563eb',
   },
   done: {
-    task: '#10b981',           // green-500
-    taskHover: '#059669',      // green-600
-    taskText: '#ffffff',
-    progress: '#047857',       // green-700
-    progressBackground: '#d1fae5', // green-100
-    milestone: '#10b981',
-    milestoneHover: '#059669',
+    task: '#22c55e',           // green-500 - 鮮やかな緑（完了感を表現）
+    taskHover: '#16a34a',      // green-600
+    taskText: '#ffffff',       // 白文字（緑背景に対して最適）
+    progress: '#15803d',       // green-700
+    progressBackground: '#dcfce7', // green-100
+    milestone: '#22c55e',
+    milestoneHover: '#16a34a',
   },
   blocked: {
-    task: '#ef4444',           // red-500
-    taskHover: '#dc2626',      // red-600
-    taskText: '#ffffff',
-    progress: '#b91c1c',       // red-700
-    progressBackground: '#fee2e2', // red-100
-    milestone: '#ef4444',
-    milestoneHover: '#dc2626',
+    task: '#f97316',           // orange-500 - オレンジ（ブロック状態を強調）
+    taskHover: '#ea580c',      // orange-600
+    taskText: '#ffffff',       // 白文字（オレンジ背景に対して最適）
+    progress: '#c2410c',       // orange-700
+    progressBackground: '#fed7aa', // orange-100
+    milestone: '#f97316',
+    milestoneHover: '#ea580c',
   },
 };
 

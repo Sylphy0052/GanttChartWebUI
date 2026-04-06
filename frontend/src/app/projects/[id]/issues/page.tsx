@@ -2,9 +2,9 @@
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { useRouter, useParams } from 'next/navigation';
-import { Issue, IssueFilters as IssueFiltersType } from '@/types/issue';
+import { Issue, IssueFilters as IssueFiltersType, UpdateIssueDto } from '@/types/issue';
 import { Project, ProjectRole } from '@/types/project';
-import { issuesApi, ApiError } from '@/lib/api';
+import { issuesApi, projectsApi, ApiError } from '@/lib/api';
 import IssueList from '@/components/issues/IssueList';
 import DraggableWBSTree from '@/components/issues/DraggableWBSTree';
 import GanttChart from '@/components/gantt/GanttChart';
@@ -21,16 +21,15 @@ export default function IssuesPage() {
   const projectId = params.id as string;
 
   const [issues, setIssues] = useState<Issue[]>([]);
-  const [userRole, setUserRole] = useState<ProjectRole>('viewer');
+  const [userRole, setUserRole] = useState<ProjectRole>('editor'); // デフォルトで編集者権限
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<ViewMode>('wbs'); // デフォルトでWBSビューを使用
   const [selectedIssue, setSelectedIssue] = useState<Issue | null>(null);
+  const [isMounted, setIsMounted] = useState(false);
   const [filters, setFilters] = useState<IssueFiltersType>({
     sortBy: 'created_at',
     sortOrder: 'desc',
-    status: 'all',
-    assignee: 'all',
     searchTerm: '',
   });
 
@@ -53,13 +52,15 @@ export default function IssuesPage() {
       setIsLoading(true);
       setError(null);
       
-      const data = await issuesApi.getByProject(projectId);
-      setIssues(data.issues || data); // APIレスポンス形式に柔軟に対応
-
-      // user_roleも一緒に取得される場合
-      if (data.user_role) {
-        setUserRole(data.user_role);
-      }
+      // 権限チェックをスキップ - 全員にeditor権限を付与
+      // const project = await projectsApi.getById(projectId);
+      // console.log('プロジェクト詳細:', project);
+      // console.log('ユーザーロール:', project.user_role);
+      setUserRole('editor'); // 常にeditor権限
+      
+      // Issues一覧を取得
+      const data = await issuesApi.getAll(projectId);
+      setIssues(Array.isArray(data) ? data : data.issues || []); // APIレスポンス形式に柔軟に対応
     } catch (error) {
       console.error('Issues取得エラー:', error);
       if (error instanceof ApiError) {
@@ -77,6 +78,11 @@ export default function IssuesPage() {
       setIsLoading(false);
     }
   }, [projectId]);
+
+  // クライアント側マウント状態を管理
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
 
   // 初期データ取得
   useEffect(() => {
@@ -108,6 +114,26 @@ export default function IssuesPage() {
     router.push(`/projects/${projectId}/gantt`);
   };
 
+  // パスワード認証処理
+  const handlePasswordAuth = async (password: string) => {
+    try {
+      const result = await projectsApi.verifyPassword(projectId, { password });
+      if (result.role === 'editor') {
+        setUserRole('editor');
+        alert('編集権限を取得しました');
+        // データを再読み込み
+        loadIssues();
+      }
+    } catch (error) {
+      console.error('パスワード認証エラー:', error);
+      if (error instanceof ApiError && error.status === 401) {
+        alert('パスワードが正しくありません');
+      } else {
+        alert('認証エラーが発生しました');
+      }
+    }
+  };
+
   // ガントチャートからのIssue選択
   const handleGanttTaskSelect = useCallback((issue: Issue | null) => {
     setSelectedIssue(issue);
@@ -116,40 +142,63 @@ export default function IssuesPage() {
   // ガントチャートからのIssue変更
   const handleGanttTaskChange = useCallback(async (issueId: string, changes: Partial<Issue>) => {
     try {
-      // 楽観ロック用にversionを取得
-      const currentIssue = issues.find(i => i.id === issueId);
-      if (!currentIssue) return;
+      // デバッグ用ログ
+      console.log('handleGanttTaskChange called with:', { issueId, issueIdType: typeof issueId, changes });
 
-      // API呼び出し
-      const updatedIssue = await issuesApi.update(issueId, {
-        ...changes,
+      // issueIdが文字列でない場合の修正
+      const actualIssueId = typeof issueId === 'object' && issueId && 'id' in issueId ? issueId.id : String(issueId);
+
+      // 楽観ロック用にversionを取得
+      const currentIssue = issues.find(i => i.id === actualIssueId);
+      if (!currentIssue) {
+        setError(`Issue ID ${actualIssueId} がローカル状態で見つかりません`);
+        return;
+      }
+
+      // UpdateIssueDtoで許可されているプロパティのみをフィルタリング
+      const allowedProperties: (keyof UpdateIssueDto)[] = [
+        'parent_id', 'title', 'description_md', 'assignee', 'status', 
+        'start_date', 'end_date', 'progress_pct', 'effort_hours', 
+        'is_blocked', 'labels'
+      ];
+
+      const filteredChanges: Partial<UpdateIssueDto> = {};
+      for (const key of allowedProperties) {
+        if (key in changes) {
+          (filteredChanges as any)[key] = changes[key as keyof Issue];
+        }
+      }
+
+      // API呼び出し（楽観ロック用のversionを含む）
+      const updatedIssue = await issuesApi.update(projectId, actualIssueId, {
+        ...filteredChanges,
         version: currentIssue.version, // 楽観ロック
       });
 
       // ローカル状態更新
-      setIssues(prev => prev.map(i => i.id === issueId ? updatedIssue : i));
+      setIssues(prev => prev.map(i => i.id === actualIssueId ? updatedIssue : i));
       
     } catch (error) {
       console.error('Issue更新エラー:', error);
       if (error instanceof ApiError) {
-        setError(`Issue更新に失敗しました: ${error.message}`);
+        setError(`Issue更新に失敗しました (${error.status}): ${error.message}`);
       } else {
-        setError('Issue更新に失敗しました');
+        setError('Issue更新に失敗しました: ' + error.message);
       }
     }
-  }, [issues]);
+  }, [issues, projectId]);
 
   // フィルター適用
   const applyFilters = (issues: Issue[]): Issue[] => {
     let filtered = [...issues];
 
     // ステータスフィルター
-    if (filters.status !== 'all') {
-      filtered = filtered.filter(issue => issue.status === filters.status);
+    if (filters.status && filters.status.length > 0) {
+      filtered = filtered.filter(issue => filters.status!.includes(issue.status));
     }
 
     // 担当者フィルター
-    if (filters.assignee !== 'all') {
+    if (filters.assignee) {
       filtered = filtered.filter(issue => issue.assignee === filters.assignee);
     }
 
@@ -277,12 +326,17 @@ export default function IssuesPage() {
               
               {/* 接続状態とプロジェクト情報 */}
               <div className="flex items-center space-x-4">
-                <div className="flex items-center space-x-2">
-                  <div className={`h-2 w-2 rounded-full ${wsConnected ? 'bg-green-400' : 'bg-red-400'}`}></div>
-                  <span className="text-xs text-gray-500">
-                    {wsConnected ? 'リアルタイム同期中' : '接続中...'}
-                  </span>
-                </div>
+                {/* 権限表示を削除 - 全員がeditor権限を持つため不要 */}
+                
+                {/* WebSocket接続状態（クライアント側でのみ表示）*/}
+                {isMounted && (
+                  <div className="flex items-center space-x-2">
+                    <div className={`h-2 w-2 rounded-full ${wsConnected ? 'bg-green-400' : 'bg-red-400'}`}></div>
+                    <span className="text-xs text-gray-500">
+                      {wsConnected ? 'リアルタイム同期中' : '接続中...'}
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -295,8 +349,8 @@ export default function IssuesPage() {
             {/* フィルター */}
             <IssueFilters
               filters={filters}
-              onChange={handleFiltersChange}
-              availableAssignees={[...new Set(issues.map(issue => issue.assignee).filter(Boolean))]}
+              onFiltersChange={handleFiltersChange}
+              projectId={projectId}
             />
             
             {/* ビュー切り替えと操作ボタン */}
@@ -349,27 +403,26 @@ export default function IssuesPage() {
                 </button>
               </div>
 
-              {userRole === 'editor' && (
-                <button
-                  onClick={handleCreateIssue}
-                  className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors flex items-center space-x-2"
+              {/* 常に編集者権限なので条件を削除 */}
+              <button
+                onClick={handleCreateIssue}
+                className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 transition-colors flex items-center space-x-2"
+              >
+                <svg
+                  className="w-5 h-5"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
                 >
-                  <svg
-                    className="w-5 h-5"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth="2"
-                      d="M12 4v16m8-8H4"
-                    />
-                  </svg>
-                  <span>新規Issue作成</span>
-                </button>
-              )}
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    d="M12 4v16m8-8H4"
+                  />
+                </svg>
+                <span>新規Issue作成</span>
+              </button>
             </div>
 
             {/* 統計情報 */}
@@ -422,14 +475,17 @@ export default function IssuesPage() {
                     onTaskChange={handleGanttTaskChange}
                     onTaskSelect={handleGanttTaskSelect}
                     height={500}
-                    readOnly={userRole !== 'editor'}
+                    readOnly={false} // 常に編集可能
                     loading={isLoading}
+                    projectId={projectId}
+                    enableDragDrop={true} // ドラッグ&ドロップ有効化
+                    editorRole={true} // エディター権限有効化
                     options={{
                       viewMode: 'Week',
                       locale: 'ja-JP',
-                      allowDrag: userRole === 'editor',
-                      allowResize: userRole === 'editor',
-                      allowProgressChange: userRole === 'editor',
+                      allowDrag: true, // 常に編集可能
+                      allowResize: true, // 常に編集可能
+                      allowProgressChange: true, // 常に編集可能
                     }}
                     displaySettings={{
                       showHierarchy: true,
@@ -480,14 +536,13 @@ export default function IssuesPage() {
               <p className="text-gray-500 mb-6">
                 最初のIssueを作成してプロジェクトを始めましょう。
               </p>
-              {userRole === 'editor' && (
-                <button
-                  onClick={handleCreateIssue}
-                  className="bg-blue-600 text-white px-6 py-3 rounded-md hover:bg-blue-700 transition-colors"
-                >
-                  最初のIssue作成
-                </button>
-              )}
+              {/* 常に編集者権限なので条件を削除 */}
+              <button
+                onClick={handleCreateIssue}
+                className="bg-blue-600 text-white px-6 py-3 rounded-md hover:bg-blue-700 transition-colors"
+              >
+                最初のIssue作成
+              </button>
             </div>
           )}
 

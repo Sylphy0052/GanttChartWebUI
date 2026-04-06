@@ -20,6 +20,12 @@ export default function NotificationHandler({
 }: NotificationHandlerProps) {
   const { isConnected, latestNotification, joinProject, leaveProject } = useWebSocket();
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [isMounted, setIsMounted] = useState(false);
+
+  // クライアント側でのみマウント状態を更新
+  useEffect(() => {
+    setIsMounted(true);
+  }, []);
 
   // プロジェクト参加/退出の制御
   useEffect(() => {
@@ -123,7 +129,8 @@ export default function NotificationHandler({
   }
 
   // 接続状態のインジケーター（デバッグ用、通常は非表示）
-  if (process.env.NODE_ENV === 'development') {
+  // クライアント側でのみ表示（Hydrationエラー防止）
+  if (process.env.NODE_ENV === 'development' && isMounted) {
     return (
       <div className="fixed bottom-4 right-4 z-40">
         <div className={`px-2 py-1 text-xs rounded ${

@@ -51,7 +51,7 @@ export interface UpdateIssueDto {
   effort_hours?: number;
   is_blocked?: boolean;
   labels?: string[];
-  // version は Backend で自動処理されるため除外
+  version?: number; // 楽観ロック用
 }
 
 export interface IssueFilters {

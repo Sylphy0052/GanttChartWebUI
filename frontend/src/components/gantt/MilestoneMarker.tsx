@@ -8,8 +8,9 @@ export interface MilestoneMarkerProps {
   issue: Issue;
   date: Date;
   size?: number;
-  onClick?: () => void;
-  onDoubleClick?: () => void;
+  onClick?: (event: React.MouseEvent) => void;
+  onDoubleClick?: (event: React.MouseEvent) => void;
+  onContextMenu?: (event: React.MouseEvent) => void;
   className?: string;
   showLabel?: boolean;
   readOnly?: boolean;
@@ -25,6 +26,7 @@ const MilestoneMarker: React.FC<MilestoneMarkerProps> = ({
   size = 16,
   onClick,
   onDoubleClick,
+  onContextMenu,
   className = '',
   showLabel = true,
   readOnly = false,
@@ -90,6 +92,7 @@ const MilestoneMarker: React.FC<MilestoneMarkerProps> = ({
         style={diamondStyle}
         onClick={onClick}
         onDoubleClick={onDoubleClick}
+        onContextMenu={onContextMenu}
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
         title={`${displayText}\n日付: ${dateText}\n進捗: ${issue.progress_pct}%\nステータス: ${getStatusDisplayName(issue.status)}${issue.is_blocked ? '\n⚠️ ブロック中' : ''}`}

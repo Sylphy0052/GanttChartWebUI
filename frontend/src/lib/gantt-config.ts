@@ -254,6 +254,150 @@ export function calculateDateRange(issues: Issue[]): { start: Date; end: Date } 
 }
 
 /**
+ * 日付グリッドヘッダーの生成
+ */
+export interface DateColumn {
+  date: Date;
+  label: string;
+  isWeekend: boolean;
+  position: number;
+  width: number;
+}
+
+/**
+ * 日付フォーマット関数
+ */
+function formatDateLabel(date: Date, prevDate: Date | null, viewMode: 'Day' | 'Week' | 'Month' | 'Year'): string {
+  const year = date.getFullYear();
+  const month = date.getMonth() + 1;
+  const day = date.getDate();
+  
+  if (viewMode === 'Day') {
+    // 日表示モード
+    if (!prevDate) {
+      // 最初の列は必ず月/日表示
+      return `${month}/${day}`;
+    }
+    
+    const prevYear = prevDate.getFullYear();
+    const prevMonth = prevDate.getMonth() + 1;
+    
+    if (year !== prevYear) {
+      // 年が変わった場合
+      return `${year}/${month}/${day}`;
+    } else if (month !== prevMonth) {
+      // 月が変わった場合
+      return `${month}/${day}`;
+    } else {
+      // 同じ月の場合は日のみ
+      return `${day}`;
+    }
+  }
+  
+  return '';
+}
+
+export function generateDateColumns(
+  startDate: Date, 
+  endDate: Date, 
+  viewMode: 'Day' | 'Week' | 'Month' | 'Year' = 'Day',
+  columnWidth: number = 60
+): DateColumn[] {
+  const columns: DateColumn[] = [];
+  const current = new Date(startDate);
+  
+  // 週表示の場合、月曜日から開始するように調整
+  if (viewMode === 'Week') {
+    const dayOfWeek = current.getDay();
+    const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+    current.setDate(current.getDate() + mondayOffset);
+  }
+  
+  let position = 0;
+  let prevDate: Date | null = null;
+
+  while (current <= endDate) {
+    const isWeekend = current.getDay() === 0 || current.getDay() === 6;
+    
+    let label: string;
+    let increment: 'day' | 'week' | 'month';
+    
+    switch (viewMode) {
+      case 'Day':
+        label = formatDateLabel(current, prevDate, viewMode);
+        increment = 'day';
+        break;
+      case 'Week':
+        // 月曜日始まりの週
+        const dayOfWeek = current.getDay();
+        const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+        const weekStart = new Date(current);
+        weekStart.setDate(current.getDate() + mondayOffset);
+        const weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekStart.getDate() + 6);
+        
+        const startMonth = weekStart.getMonth() + 1;
+        const startDay = weekStart.getDate();
+        const endMonth = weekEnd.getMonth() + 1;
+        const endDay = weekEnd.getDate();
+        
+        if (startMonth === endMonth) {
+          label = `${startMonth}/${startDay}-${endDay}`;
+        } else {
+          label = `${startMonth}/${startDay}-${endMonth}/${endDay}`;
+        }
+        increment = 'week';
+        break;
+      case 'Month':
+        label = current.toLocaleDateString('ja-JP', { year: 'numeric', month: 'short' });
+        increment = 'month';
+        break;
+      case 'Year':
+        label = current.toLocaleDateString('ja-JP', { year: 'numeric' });
+        increment = 'month'; // 年表示でも月単位で進む
+        break;
+      default:
+        label = formatDateLabel(current, prevDate, 'Day');
+        increment = 'day';
+    }
+
+    columns.push({
+      date: new Date(current),
+      label,
+      isWeekend,
+      position,
+      width: columnWidth,
+    });
+
+    // prevDateを更新
+    prevDate = new Date(current);
+
+    // 次の日付へ進む
+    switch (increment) {
+      case 'day':
+        current.setDate(current.getDate() + 1);
+        break;
+      case 'week':
+        // 月曜日始まりで7日進める
+        if (viewMode === 'Week') {
+          // 現在の週の月曜日から次の週の月曜日へ
+          current.setDate(current.getDate() + 7);
+        } else {
+          current.setDate(current.getDate() + 7);
+        }
+        break;
+      case 'month':
+        current.setMonth(current.getMonth() + 1);
+        break;
+    }
+
+    position += columnWidth;
+  }
+
+  return columns;
+}
+
+/**
  * 階層構造を考慮したIssue並び替え
  */
 export function sortIssuesForGantt(issues: Issue[]): Issue[] {
