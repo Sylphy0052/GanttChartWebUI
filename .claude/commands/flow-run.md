@@ -1,103 +1,70 @@
 ---
-allowed-tools: Bash(git:*), Bash(codex:*), Read(*.md), Fetch(*)
-description: "指定した1マイルストーン、または1フェーズをまとめて進め、最後に総合テスト・レビュー・承認を行います。Codex 連携はデフォルト。"
-updated: "2025-09-10"
+description: |
+  [TDDサイクル連続実行] 一つのタスクが完了するまで、または指定ステップ数だけflow-nextを自動で繰り返します。
+argument_hint: "[--steps <数>] [--codex (任意)]"
+notes: |
+  バージョン: 1.0
+  このコマンドは内部で `flow-next` を呼び出します。
 ---
+# Flow: TDDサイクル連続実行コマンド (flow-run)
 
-あなたは **統合コマンド (flow-run)** です。**1マイルストーン**または**1フェーズ**をまとめて進め、その後に総合テスト・レビュー・人間承認を行います。
+このコマンドは、`flow-next`を自動で繰り返し実行し、開発プロセスを高速化します。
+デフォルトでは、現在のタスクが完了するまで（Red→Green→Refactorの1サイクルが終了するまで）実行されます。
 
-## 実行モード（いずれか必須）
+## 使用例
 
-- `--milestone "<name|index|current>"` : 指定マイルストーンが **完了条件** を満たすまで `flow-next` を繰り返す
-- `--phase <red|green|refactor>` : 指定フェーズを **完了条件** まで繰り返す
+```bash
+# 現在のタスクが完了するまで、Claudeエージェントで自動実行
+/flow-run
 
-> 未指定時は **`--milestone current`** を既定。
-
-## 繰り返し制御
-
-- 内部で `flow-next --cycles 1` を **必要回数** 呼び出し、state を逐次更新
-- セーフティ上限 `--max-steps <M>`（既定: 10）を超えると停止
-
-## 内部実行（Orchestration）
-
-- 反復中の **各ステップ**で `flow-next --cycles 1` を内部実行（その内部で `tests-step` / `codex-review` が呼ばれる）
-- 反復終了後に **`codex-run`**（`tests/coverage/lint/typecheck`）を内部実行して総合結果を取得
-- 比較レポートは **`codex-bridge`** を内部実行して生成（Codex vs Reviewer の差異・解消方針）
-- ドキュメント整合が必要な場合は **Doc Writer サブエージェント** を内部実行（README/CHANGELOG など）
-- 公開API/設定/依存に影響する変更がある場合、**`doc-sync`** を実行しドキュメント整合を確保
-- `doc-sync` 内で **Docs Guardian** による乖離検出を必ず実施
-
-## 手順
-
-1. **対象の決定**
-   - `--milestone` or `--phase` を解析し、ゴール条件を確定
-
-2. **まとめ実行（flow-next 反復）**
-   - 上記の繰り返し制御に従い `flow-next` を連続実行
-   - 途中で停止条件に当たれば中断して要約・原因・推奨を出す
-
-3. **総合テスト（Codex 連携・デフォルト）**
-   - `codex run tests`
-   - `codex run coverage`
-   - `codex run lint`
-   - `codex run typecheck`
-
-4. **レビュー統合**
-   - **Reviewer サブエージェント** と **Codex** の所見を突き合わせ、差異を整理
-   - 必要に応じて **Doc Writer サブエージェント** を呼び、README/CHANGELOG/docs を更新提案
-
-5. **人間承認 → 適用**
-   - 主要差分を unified diff で提示
-   - 「適用しますか？ (Yes/No)」を必ず確認
-   - Yes → 統合 & `CHANGELOG.md` 追記 & リリースノート案生成
-   - No → 変更破棄（ロールバック案提示）
-
-## 引数
-
-- `--milestone "<name|index|current>"` : マイルストーン単位の実行
-- `--phase <red|green|refactor>` : フェーズ単位の実行
-- `--max-steps <M>` : 内部で呼ぶ `flow-next` の最大回数（既定 10）
-- `--no-bridge` : `codex-bridge` を省略
-- `--no-codex` : Codex 呼び出し抑止（**既定は Codex 連携**）
-- `--dry-run` : 適用せずに結果のみ
-
-## 出力形式
-
-【実行サマリ】
-
-- mode: milestone|phase
-- target: <milestone name|index|phase>
-- executed_steps: K / max-steps
-- stop_reason: <completed|safety-limit|error|user-stop>
-
-【差分要約（主要変更の抜粋）】
-
-```diff
-<unified diff>
+# 2ステップだけ、Codexエージェントで自動実行
+/flow-run --steps 2 --codex
 ```
 
-【総合テスト結果】
+## 実行フロー
 
-- tests / coverage / lint / typecheck 要約
+### ステップ1: 実行条件の決定
 
-【レビュー要約】
+コマンドに与えられた引数を解析し、実行の停止条件を決定します。
 
-- Reviewer サブエージェントの所見
-- Codex の所見
-- 差異と統合見解
+- **`--steps <数>` オプションが指定されている場合:**
+    停止条件は「指定されたステップ数を実行完了すること」です。
+    最大実行回数を設定します。
 
-【承認確認】
+- **`--steps` オプションが指定されていない場合（デフォルト）:**
+    停止条件は「現在のタスクが完了し、次のタスクの`red`フェーズに移行すること」です。
+    安全のため、最大実行回数を5ステップに設定します。
 
-- 適用しますか？ (Yes/No)
+### ステップ2: `flow-next`の反復実行
 
-【リリースノート案】
+決定された停止条件に達するまで、以下のループ処理を実行します。
 
-- 機能追加: ...
-- 修正: ...
-- 注意事項: ...
+1. **進捗報告:**
+    「実行中... (現在 `N` ステップ目, Phase: `(現在のフェーズ)`)」のように、現在の状況を報告します。
 
-### 安全策
+2. **`flow-next`の内部呼び出し:**
+    この`flow-run`コマンドに与えられた`--codex`オプションを引き継いで、`flow-next`コマンドを内部的に実行します。
+    - **もし `--codex` オプションが指定されている場合:**
+        `/flow-next --codex` を実行します。
+    - **そうでなければ（デフォルト）:**
+        `/flow-next` を実行します。
 
-- `--max-steps` 超過 → 停止して要約提示
-- 大規模差分を検知 → 停止して「分割提案」
-- 破壊的変更の兆候 → 停止して明示同意要求
+3. **停止条件のチェック:**
+    `flow-next`の実行後、現在の状態を確認し、停止条件に達したか、またはエラーが発生したかをチェックします。
+    - **停止条件に達した場合:** ループを終了し、**ステップ3**に進みます。
+    - **`flow-next`がエラーで中断した場合:** ループを終了し、「エラーにより中断しました。」と報告して処理を終了します。
+    - **どちらでもない場合:** ループを継続します（1. に戻る）。
+
+### ステップ3: 最終報告
+
+ループ処理が正常に完了したことを報告します。
+
+**進捗報告:**
+「`flow-run`が正常に完了しました。合計 `N` ステップを実行しました。」
+
+最後に、`@state-manager`を呼び出して、最終的なプロジェクトの状態を表示してください。
+
+@state-manager
+
+- **Operation:** status
+- **Details:** 現在の状態を要約して報告してください。

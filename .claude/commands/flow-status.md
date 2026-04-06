@@ -1,44 +1,54 @@
 ---
-allowed-tools: Read(*.md)
-description: "現在の状態（phase/current_task/next_tasks/last_diff/last_test_result 等）を要約表示します。state がなければ flow-init を促します。"
-updated: "2025-09-10"
+description: |
+  [進捗確認] 現在のタスクリストの進捗と、TDDサイクルのフェーズを表示します。
+notes: |
+  バージョン: 1.0
+  状態管理: @state-manager
+---
+# Flow: 進捗確認コマンド (flow-status)
+
+このコマンドは、現在のプロジェクトの進捗状況を要約して表示します。
+具体的には、`.flow/tasks.md`と`.flow/state.json`の内容を解析し、開発の「現在地」を明確にします。
+
+## 使用例
+
+```bash
+/flow-status
+```
+
 ---
 
-あなたは **ステータス表示コマンド (flow-status)** です。`.claude/flow/state.json` を読み取り、プロジェクトの現在地を**簡潔に**示します。
+## 実行フロー
 
-## 出力形式
+### ステップ1: 事前チェック
 
-【現在の状態】
+まず、`.flow`ディレクトリと状態ファイル（`tasks.md`, `state.json`）が存在するかを確認します。
 
-- phase: <red|green|refactor|review|integrate|ready>
-- current_task: <text>
-- next_tasks (max 5):
-  1. ...
-  2. ...
-- last_diff（要約）:
+- **もし、状態ファイルが存在しない場合:**
+    処理を中断し、「エラー: `flow`プロジェクトが初期化されていません。`/flow-init`コマンドでプロジェクトを開始してください。」と報告してください。
 
-  ```diff
-  <直近の変更点の抜粋>
-  ```
+### ステップ2: 状態の要約表示 (by @state-manager)
 
-- last_test_result: <passed|failed|unknown>
-- warnings:
-  - ...
+`@state-manager`エージェントを呼び出し、現在のプロジェクト状態の完全なレポートを生成させます。
 
-【補足】
+@state-manager
 
-- spec_digest（`docs/spec.md` の要点/ハッシュ）: ...
-- plan 概要（milestones / acceptance_criteria / risks）: ...
-- research_digest（要点）: ...
-- updated_at: <ISO8601>
+- **Operation:** status
+- **Details:** 現在の状態を詳細に要約して報告してください。
 
-## 動作ルール
+`@state-manager`は、以下の情報を含むレポートを生成します。
 
-- state が無い場合は **flow-init** を案内
-- 情報が欠けている要素（例: カバレッジ等）は省略/空で返す
-- 表示は**人間が一目で把握**できるよう短く要点のみ
+- **進捗サマリー:** 全タスク数、完了タスク数、進捗率（%）
+- **現在のフェーズ:** `red`, `green`, `refactor` のいずれか
+- **現在のタスク:** 今まさに取り組んでいるタスク
+- **次のタスクリスト:** これから取り組む予定のタスク（最大5件）
 
-### 注意事項
+### ステップ3: 最終報告
 
-- 出力は秘匿情報を含めないこと
-- `phase` と `current_task` は最優先で表示すること
+`@state-manager`からのレポートを受け取り、それをユーザーに表示します。
+最後に、次に行うべきアクションのヒントを提示します。
+
+- **もし、未完了のタスクが残っている場合:**
+    「次のステップに進むには、`/flow-next`を実行してください。」と案内します。
+- **もし、全てのタスクが完了している場合:**
+    「🎉 全てのタスクが完了しました！プロジェクトの完成です。」と報告します。

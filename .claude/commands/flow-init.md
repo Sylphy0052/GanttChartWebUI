@@ -1,73 +1,83 @@
 ---
-allowed-tools: Bash(git:*), Bash(codex:*), Read(*.md), Fetch(*)
-description: "初期化。docs/spec.md を読み、調査→計画→最初の Red テスト準備→state 作成までを自動実行します。Codex 連携はデフォルト。"
-updated: "2025-09-10"
+description: |
+  [プロジェクト初期化] 仕様書から開発タスクを抽出し、タスクリストと状態ファイルを生成します。
+argument_hint: "[仕様書のファイルパス] [--reset (任意)]"
+notes: |
+  バージョン: 1.0
+  計画担当: @planner
+  状態管理: @state-manager
+---
+# Flow: プロジェクト初期化コマンド (flow-init)
+
+このコマンドは、指定された仕様書（例: `docs/spec.md`）を読み込み、AIが実行可能なタスクリスト（`.flow/tasks.md`）と、進捗を管理する状態ファイル（`.flow/state.json`）を自動生成します。
+
+## 使用例
+
+```bash
+# docs/spec.md を基にプロジェクトを初期化
+/flow-init docs/spec.md
+
+# 既存のタスクをリセットして、新しい仕様書で再初期化
+/flow-init docs/new_spec.md --reset
+```
+
 ---
 
-あなたは **初期化コマンド (flow-init)** です。引数が無ければ自動で情報源を探索し、TDD を開始できる最小セットを整えます。必要に応じて `--goal` などで上書きできます。
+## 実行フロー
 
-## デフォルト挙動（引数なし）
+### ステップ1: 事前チェックとセットアップ
 
-1. **情報源の発見**
-   - `docs/spec.md`（必須・Claudeの基準）
-   - `README.md` / `docs/` / `SPEC.md` / `PRD.md`
-   - 直近の Issue/ToDo（`TODO.md` / `CHANGELOG.md` など）
+まず、既存の状態ファイルがあるか確認します。
 
-2. **調査 (Research) — サブエージェント使用**
-   - `.claude/agents/spec-writer.md` を用い、仕様・既存コード・外部APIの現状を把握
-   - **出力**: `research_digest`（要点 / 未解決のオープンクエスチョン）
+- **もし `.flow` ディレクトリが既に存在する場合:**
+  - **そして `--reset` オプションが指定されていない場合:**
+        処理を**中断**し、「エラー: 既存のタスクリストが見つかりました。再初期化するには `--reset` オプションを付けてください。または `flow-reset` コマンドでリセットしてください。」と報告してください。
+  - **そして `--reset` オプションが指定されている場合:**
+        `@state-manager` を呼び出し、既存の状態を安全にリセット（バックアップ作成後に削除）してください。
+        `@state-manager`
+    - **Operation:** reset
+    - **Details:** 安全なバックアップを作成した後、状態をリセットしてください。
 
-3. **計画 (Plan) — サブエージェント使用**
-   - `.claude/agents/planner.md` を用い、**≤2h タスク**に分解し受入基準を整備（Given/When/Then）
-   - **出力**: `plan.milestones[]`, `acceptance_criteria[]`, `risks[]`
+- **もし `.flow` ディレクトリが存在しない場合:**
+    `.flow` ディレクトリを新規に作成してください。
 
-4. **目的・制約の要約**
-   - 目的 (Goal) / 非目的 (Non-Goals) / 制約（技術・運用・性能・セキュリティ）を抽出
+### ステップ2: 開発計画の策定 (by @planner)
 
-5. **最初の Red テスト準備**
-   - `tests/` が無ければ作成し、**失敗が保証される**最小テストの叩き台を提示
-   - テスト実行は **プロジェクト既定のテストランナー** を前提（言語非依存）
+**進捗報告:**
+「ステップ2/3: 仕様書を分析し、開発計画を策定します...」
 
-6. **状態ファイルの生成**
-   - `.claude/flow/state.json` を新規作成（既存があれば `.bak-YYYYMMDD-HHMMSS` を保存）
-   - **初期値例**:
+`@planner` エージェントを呼び出し、指定された仕様書から開発計画を策定させます。
+生成された計画は、`.flow/tasks.md` というファイルに保存してください。
 
-     ```json
-     {
-       "phase": "red",
-       "goal": "<短い目的>",
-       "research_digest": "<要点サマリ>",
-       "plan": {
-         "milestones": ["..."],
-         "acceptance_criteria": ["Given/When/Then ..."],
-         "risks": ["..."]
-       },
-       "current_task": "<First Task>",
-       "next_tasks": ["..."]
-     }
-     ```
+@planner
 
-7. **Codex 連携（デフォルト）**
-   - `codex review .` の要点を収集
-   - `codex run tests` を呼び、テスト系の初期動作を確認（存在する場合）
+- **仕様書ファイル:** `$1`
+- **アウトプット:** `.flow/tasks.md`
 
-## 任意引数
+**成功時報告:**
+「開発計画の策定が完了し、`.flow/tasks.md` に保存しました。」
 
-- `--goal "<text>"` : 目的テキストを直接指定（spec より優先）
-- `--spec "<file>"` : 仕様ファイルを明示指定（既定: `docs/spec.md`）
-- `--reset` : 既存 state を無視して再生成
-- `--no-codex` : Codex 呼び出しを抑止（**デフォルトは Codex 連携**）
+### ステップ3: 状態ファイルの初期化 (by @state-manager)
 
-## 出力形式（人間が読みやすい要約）
+**進捗報告:**
+「ステップ3/3: プロジェクトの状態を初期化します...」
 
-【Research 要点】 …
-【Plan 要点】 …
-【受入基準 (G/W/T)】 …
-【最初の Red テスト】 ファイル名 / 目的 / 実行結果（失敗の抜粋）
-【state.json 要約】 phase / current_task / next_tasks / warnings
+`@state-manager` エージェントを呼び出し、状態ファイル `.flow/state.json` を初期状態で作成させます。初期フェーズは常に `red` です。
 
-### 注意事項
+@state-manager
 
-- **サブエージェント（spec-writer / planner）** を必ず使用し、調査→計画を経てから Red を作成すること
-- 初期化直後は常に **Red フェーズ** から開始
-- state は人間が追える粒度で整形し、秘匿情報は含めないこと
+- **Operation:** initialize_state
+- **Initial State:** `{ "phase": "red" }`
+- **Output File:** `.flow/state.json`
+
+**成功時報告:**
+「状態ファイルの初期化が完了しました。」
+
+### ステップ4: 最終報告
+
+全ての初期化プロセスが完了したことを報告し、最後に `@state-manager` を呼び出して、生成されたばかりのプロジェクトの初期状態を表示してください。
+
+@state-manager
+
+- **Operation:** status
+- **Details:** 現在の状態を要約して報告してください。
